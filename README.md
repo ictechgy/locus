@@ -118,19 +118,23 @@ breadcrumb mcp [--out DIR]
 
 ## 에이전트 연동 (MCP)
 
-Claude Code (`claude_desktop_config.json` / `.mcp.json`):
+Claude Code (`claude_desktop_config.json` / `.mcp.json`) — 쿼리가 지도를 찾을
+위치를 고정하기 위해 CWD 대신 `--out`으로 프로젝트의 `.breadcrumb`를 지정하는
+것이 이식 가능한 방법:
 
 ```json
 {
   "mcpServers": {
     "breadcrumb": {
       "command": "/absolute/path/to/breadcrumb",
-      "args": ["mcp"],
-      "cwd": "/path/to/your/ios/project"
+      "args": ["mcp", "--out", "/path/to/your/ios/project/.breadcrumb"]
     }
   }
 }
 ```
+
+클라이언트가 `cwd`를 지원하면 `args: ["mcp"]` + `cwd: /path/to/your/ios/project`로
+같은 효과를 낼 수 있다.
 
 Cursor (`~/.cursor/mcp.json`): 동일한 형식.
 
@@ -199,6 +203,20 @@ v0.3  동적 스냅샷 결합(시뮬레이터 a11y 덤프 매칭) + MCP 4툴 고
 v1.x  화면 경계 유추, IndexStoreDB 심볼 앵커, identifier 코드젠,
       Android 확장(Kotlin/Compose)
 ```
+
+---
+
+## 개발
+
+```bash
+make test        # swift test — 30 tests
+make release     # 첫 릴리스 빌드는 swift-syntax 컴파일로 수 분 걸린다
+```
+
+- 의존성은 `swift-syntax` 하나뿐이다. 다른 의존성을 추가할 때는 기획서의
+  "완전 로컬·결정적" 원칙과 함께 논의할 것.
+- `Examples/DemoApp`에 직접 `.git`을 만들지 말 것 — `Scripts/setup-demo.sh`를
+  쓸 것 (이유는 "정직한 한계" 참고).
 
 ---
 

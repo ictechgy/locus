@@ -1,7 +1,7 @@
 import Foundation
 import BreadcrumbCore
 
-let version = "0.1.0"
+let version = MapFormat.releaseVersion
 
 let helpText = """
 breadcrumb 0.1.0 — a map between UI elements and source for agents.

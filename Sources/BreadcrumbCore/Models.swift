@@ -135,7 +135,9 @@ public struct BreadcrumbMap: Codable, Equatable {
 
 public enum MapFormat {
     public static let version = 1
-    public static let tool = "breadcrumb 0.1.0"
+    /// Single source of truth for the release version (CLI, MCP serverInfo, tool string).
+    public static let releaseVersion = "0.1.0"
+    public static let tool = "breadcrumb \(releaseVersion)"
     /// Default map directory, relative to the current working directory.
     public static let defaultDirectoryName = ".breadcrumb"
 }
