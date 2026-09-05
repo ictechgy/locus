@@ -2,19 +2,32 @@ import Foundation
 import SwiftSyntax
 import SwiftParser
 
-/// Kind names breadcrumb recognizes as "interactive-looking" controls.
+/// Kind names breadcrumb recognizes as controls.
 public enum ControlKnowledge {
-    /// SwiftUI controls (used for kind guessing and missing-identifier detection).
-    public static let swiftUIControls: Set<String> = [
+    /// SwiftUI element kinds (kind guessing + label context).
+    public static let swiftUIKinds: Set<String> = [
         "Button", "Toggle", "TextField", "SecureField", "Slider", "Picker",
         "Stepper", "Link", "Menu", "NavigationLink", "DatePicker", "ColorPicker",
         "Image", "Text", "Label", "ProgressView", "TabView", "List",
     ]
-    /// UIKit control types (used for kind guessing and missing-identifier detection).
-    public static let uiKitControls: Set<String> = [
+    /// SwiftUI kinds that block automation when unidentified (tap/type targets).
+    /// Static text/images can be matched by label instead — counting them as
+    /// debt drowned real findings in 64% noise on a production codebase (P0).
+    public static let swiftUIInteractiveKinds: Set<String> = [
+        "Button", "Toggle", "TextField", "SecureField", "Slider", "Picker",
+        "Stepper", "Link", "Menu", "NavigationLink", "DatePicker", "ColorPicker",
+    ]
+    /// UIKit control types (kind guessing for assignments and properties).
+    public static let uiKitKinds: Set<String> = [
         "UIButton", "UISwitch", "UITextField", "UITextView", "UILabel",
         "UISlider", "UIStepper", "UIPickerView", "UIDatePicker", "UISegmentedControl",
         "UISearchBar", "UIPageControl", "UIImageView",
+    ]
+    /// UIKit control types that block automation when unidentified.
+    public static let uiKitInteractiveKinds: Set<String> = [
+        "UIButton", "UISwitch", "UITextField", "UITextView",
+        "UISlider", "UIStepper", "UIPickerView", "UIDatePicker", "UISegmentedControl",
+        "UISearchBar", "UIPageControl",
     ]
 }
 
@@ -22,9 +35,13 @@ public enum ControlKnowledge {
 public struct RawHit {
     enum Flavor { case identifier, label }
     var flavor: Flavor
-    /// Literal string value, when statically known. Nil for interpolated or
-    /// dynamic strings — a documented static-analysis residual.
+    /// Statically known value: a plain string literal, or a member chain
+    /// (`A11yIdentifiers.roomScreen.name`) resolved after the whole-repo
+    /// constant table is complete. Nil for dynamic expressions — a documented
+    /// static-analysis residual.
     var value: String?
+    /// Unresolved member chain, when the argument was a constant reference.
+    var chain: [String]?
     var file: String
     var line: Int
     var column: Int
@@ -34,7 +51,22 @@ public struct RawHit {
     /// statement (SwiftUI), or the same outlet property inside the same member
     /// (UIKit).
     var groupKey: String
-    var hasLiteral: Bool { value != nil }
+    var hasValue: Bool { value != nil }
+
+    init(
+        flavor: Flavor, value: String?, chain: [String]? = nil,
+        file: String, line: Int, column: Int, symbol: String, kindGuess: String, groupKey: String
+    ) {
+        self.flavor = flavor
+        self.value = value
+        self.chain = chain
+        self.file = file
+        self.line = line
+        self.column = column
+        self.symbol = symbol
+        self.kindGuess = kindGuess
+        self.groupKey = groupKey
+    }
 }
 
 /// A SwiftUI control call site seen during the walk, used afterwards to decide
@@ -67,36 +99,53 @@ public struct Crawler {
     public init() {}
 
     /// Crawl one file. `relativePath` is the POSIX path relative to the source
-    /// root and is what appears in output.
+    /// root and is what appears in output. Returns raw hits (constant chains
+    /// unresolved — resolve them once the whole-repo `ConstantTable` is
+    /// complete), control call sites, UIKit outlet candidates, assigned outlet
+    /// names, and the file's constant declarations.
     public func crawlFile(source: String, relativePath: String) throws
-        -> (hits: [RawHit], controlSites: [ControlCallSite], outletCandidates: [MissingIdentifier], assignedOutletNames: Set<String>)
+        -> (hits: [RawHit], controlSites: [ControlCallSite], outletCandidates: [MissingIdentifier], assignedOutletNames: Set<String>, declarations: DeclarationCollector)
     {
         let tree = Parser.parse(source: source)
         let visitor = AccessibilityVisitor(relativePath: relativePath, source: source)
         visitor.walk(tree)
-        return (visitor.hits, visitor.controlSites, visitor.outletCandidates, visitor.assignedOutletNames)
+        let declarations = DeclarationCollector()
+        declarations.walk(tree)
+        return (visitor.hits, visitor.controlSites, visitor.outletCandidates, visitor.assignedOutletNames, declarations)
     }
 
     /// Crawl a whole source root.
     /// - Parameters:
     ///   - root: directory to crawl.
     ///   - excludes: glob patterns of paths to skip.
-    /// - Returns: element records and missing-identifier findings, both sorted
-    ///   deterministically.
-    public func crawl(root: URL, excludes: [String]) throws -> (elements: [ElementRecord], missing: [MissingIdentifier]) {
+    /// - Returns: element records, missing-identifier findings (both sorted
+    ///   deterministically), and the constant table built along the way (the
+    ///   test scanner reuses it to resolve constant references in tests).
+    public func crawl(root: URL, excludes: [String]) throws
+        -> (elements: [ElementRecord], missing: [MissingIdentifier], constants: ConstantTable)
+    {
         let files = try SourceTree.swiftFiles(under: root, excludes: excludes)
         let readRoot = root.resolvingSymlinksInPath()
         var allHits: [RawHit] = []
         var allSites: [ControlCallSite] = []
         var outletCandidates: [MissingIdentifier] = []
         var assignedNamesPerFile: [String: Set<String>] = [:]
+        var constants = ConstantTable()
         for relative in files {
             let source = SourceTree.readSource(at: readRoot.appendingPathComponent(relative))
-            let (hits, sites, outlets, assigned) = try crawlFile(source: source, relativePath: relative)
+            let (hits, sites, outlets, assigned, declarations) = try crawlFile(source: source, relativePath: relative)
+            constants.absorb(declarations)
             allHits.append(contentsOf: hits)
             allSites.append(contentsOf: sites)
             outletCandidates.append(contentsOf: outlets)
             assignedNamesPerFile[relative] = assigned
+        }
+        // Constant chains resolve only now: the table spans the whole crawl.
+        allHits = allHits.map { hit in
+            guard hit.value == nil, let chain = hit.chain else { return hit }
+            var resolved = hit
+            resolved.value = constants.resolve(chain: chain)
+            return resolved
         }
         let records = Self.merge(hits: allHits).sorted {
             if $0.file != $1.file { return $0.file < $1.file }
@@ -107,8 +156,8 @@ public struct Crawler {
 
         // Missing identifiers, SwiftUI side: control call sites whose statement
         // group never received an identifier hit.
-        let identifierGroups = Set(allHits.filter { $0.flavor == .identifier && $0.hasLiteral }.map(\.groupKey))
-        let labeledGroups = Set(allHits.filter { $0.flavor == .label && $0.hasLiteral }.map(\.groupKey))
+        let identifierGroups = Set(allHits.filter { $0.flavor == .identifier && $0.hasValue }.map(\.groupKey))
+        let labeledGroups = Set(allHits.filter { $0.flavor == .label && $0.hasValue }.map(\.groupKey))
         var missing: [MissingIdentifier] = allSites.compactMap { site in
             guard !identifierGroups.contains(site.groupKey) else { return nil }
             return MissingIdentifier(
@@ -127,7 +176,7 @@ public struct Crawler {
             if $0.line != $1.line { return $0.line < $1.line }
             return $0.symbol < $1.symbol
         }
-        return (records, sortedMissing)
+        return (records, sortedMissing, constants)
     }
 
     // MARK: - Merging
@@ -144,7 +193,7 @@ public struct Crawler {
             let labelHits = groupHits.filter { $0.flavor == .label }
             for idHit in identifierHits {
                 guard let identifier = idHit.value, !identifier.isEmpty else { continue }
-                let label = labelHits.first { $0.hasLiteral }?.value
+                let label = labelHits.first { $0.hasValue }?.value
                 let kind = (idHit.kindGuess == "Unknown")
                     ? (labelHits.first?.kindGuess ?? "Unknown")
                     : idHit.kindGuess
@@ -184,12 +233,18 @@ private final class AccessibilityVisitor: SyntaxVisitor {
         super.init(viewMode: .sourceAccurate)
     }
 
-    // SwiftUI modifier calls: `.accessibilityIdentifier("id")`.
+    // SwiftUI modifier calls: `.accessibilityIdentifier("id")` or
+    // `.accessibilityIdentifier(A11yIdentifiers.roomScreen.name)`.
     override func visit(_ node: FunctionCallExprSyntax) -> SyntaxVisitorContinueKind {
+        // Labeled-argument form: custom components take the identifier as a
+        // parameter — `.compound(labelText: …, accessibilityIdentifier: A11y.x)`.
+        // Runs for every call; the modifier form's own argument is unlabeled,
+        // so there is no double extraction.
+        extractLabeledIdentifierArguments(of: node)
         guard let member = node.calledExpression.as(MemberAccessExprSyntax.self) else {
             // Possibly a control call site: `Button("Start") { ... }`.
-            if let callName = Self.simpleCallName(node.calledExpression),
-               ControlKnowledge.swiftUIControls.contains(callName) {
+            if let callName = SyntaxText.simpleCallName(node.calledExpression),
+               ControlKnowledge.swiftUIInteractiveKinds.contains(callName) {
                 recordControlSite(callName: callName, call: node)
             }
             return .visitChildren
@@ -198,7 +253,7 @@ private final class AccessibilityVisitor: SyntaxVisitor {
         switch name {
         case "accessibilityIdentifier", "accessibilityLabel":
             let flavor: RawHit.Flavor = name == "accessibilityIdentifier" ? .identifier : .label
-            let literal = Self.firstStringLiteral(in: node.arguments)
+            let argument = Self.argumentValue(in: node.arguments)
             let ctx = enclosingContext(of: node)
             let statementOffset = ctx.codeBlockItemOffset
                 .map(String.init) ?? "\(node.positionAfterSkippingLeadingTrivia.utf8Offset)"
@@ -209,7 +264,8 @@ private final class AccessibilityVisitor: SyntaxVisitor {
             )
             hits.append(RawHit(
                 flavor: flavor,
-                value: literal,
+                value: argument.literal,
+                chain: argument.chain,
                 file: relativePath,
                 line: position.line,
                 column: position.column,
@@ -220,8 +276,8 @@ private final class AccessibilityVisitor: SyntaxVisitor {
         default:
             // A modifier call on some chain; if the chain head is a known
             // control, remember it as a potential missing-identifier site.
-            if let callName = Self.simpleCallName(node.calledExpression),
-               ControlKnowledge.swiftUIControls.contains(callName) {
+            if let callName = SyntaxText.simpleCallName(node.calledExpression),
+               ControlKnowledge.swiftUIInteractiveKinds.contains(callName) {
                 recordControlSite(callName: callName, call: node)
             }
             break
@@ -239,16 +295,19 @@ private final class AccessibilityVisitor: SyntaxVisitor {
             guard memberName == "accessibilityIdentifier" || memberName == "accessibilityLabel" else { continue }
             let flavor: RawHit.Flavor = memberName == "accessibilityIdentifier" ? .identifier : .label
             let rhs = elements[index + 1]
-            let literal = rhs.as(StringLiteralExprSyntax.self).flatMap(Self.literalText)
+            let literal = rhs.as(StringLiteralExprSyntax.self).flatMap(SyntaxText.plainLiteral)
+            let chain = literal == nil ? SyntaxText.memberChain(rhs) : nil
             let ctx = enclosingContext(of: node)
             let root = Self.basePropertyName(lhs.base)
-            if flavor == .identifier, let root {
+            let hasValue = literal != nil || chain != nil
+            if flavor == .identifier, hasValue, let root {
                 assignedOutletNames.insert(root)
             }
             let suffix = root ?? "anon\(node.positionAfterSkippingLeadingTrivia.utf8Offset)"
             hits.append(RawHit(
                 flavor: flavor,
                 value: literal,
+                chain: chain,
                 file: relativePath,
                 line: lineIndex.lineColumn(utf8Offset: element.positionAfterSkippingLeadingTrivia.utf8Offset).line,
                 column: lineIndex.lineColumn(utf8Offset: element.positionAfterSkippingLeadingTrivia.utf8Offset).column,
@@ -267,18 +326,19 @@ private final class AccessibilityVisitor: SyntaxVisitor {
         let propertyName = pattern.identifier.text
         // Remember declared or inferred control types for later kind guesses.
         if let annotation = binding.typeAnnotation {
-            let baseType = SelfTrimming.trimmed(annotation.type.description)
-            if ControlKnowledge.uiKitControls.contains(baseType) {
+            let baseType = SyntaxText.trimmedTypeName(annotation.type.description)
+            if ControlKnowledge.uiKitKinds.contains(baseType) {
                 propertyKinds[propertyName] = baseType
             }
         } else if let initializer = binding.initializer?.value.as(FunctionCallExprSyntax.self),
-                  let name = Self.simpleCallName(initializer.calledExpression),
-                  ControlKnowledge.uiKitControls.contains(name) {
+                  let name = SyntaxText.simpleCallName(initializer.calledExpression),
+                  ControlKnowledge.uiKitKinds.contains(name) {
             propertyKinds[propertyName] = name
         }
-        // Both annotated (`var x: UIButton!`) and inferred
-        // (`let x = UIButton(type:)`) control properties are candidates.
-        guard let controlType = propertyKinds[propertyName] else { return .visitChildren }
+        // Only interactive controls are automation debt: `let x: UIButton!`
+        // without an identifier blocks automation; a UILabel does not.
+        guard let controlType = propertyKinds[propertyName],
+              ControlKnowledge.uiKitInteractiveKinds.contains(controlType) else { return .visitChildren }
         let ctx = enclosingContext(of: node)
         let symbol = ctx.symbol.isEmpty
             ? pattern.identifier.text
@@ -293,6 +353,36 @@ private final class AccessibilityVisitor: SyntaxVisitor {
             hasLabel: false
         ))
         return .visitChildren
+    }
+
+    private func extractLabeledIdentifierArguments(of node: FunctionCallExprSyntax) {
+        for argument in node.arguments {
+            guard let label = argument.label else { continue }
+            let name = SyntaxText.normalizedName(label.text)
+            guard name == "accessibilityIdentifier" || name == "accessibilityLabel" else { continue }
+            let flavor: RawHit.Flavor = name == "accessibilityIdentifier" ? .identifier : .label
+            let literal = argument.expression.as(StringLiteralExprSyntax.self).flatMap(SyntaxText.plainLiteral)
+            let chain = literal == nil ? SyntaxText.memberChain(argument.expression) : nil
+            let ctx = enclosingContext(of: node)
+            let statementOffset = ctx.codeBlockItemOffset
+                .map(String.init) ?? "\(node.positionAfterSkippingLeadingTrivia.utf8Offset)"
+            let position = lineIndex.lineColumn(
+                utf8Offset: argument.positionAfterSkippingLeadingTrivia.utf8Offset
+            )
+            let kind = SyntaxText.simpleCallName(node.calledExpression)
+                .map { ControlKnowledge.swiftUIKinds.contains($0) ? $0 : "Unknown" } ?? "Unknown"
+            hits.append(RawHit(
+                flavor: flavor,
+                value: literal,
+                chain: chain,
+                file: relativePath,
+                line: position.line,
+                column: position.column,
+                symbol: ctx.symbol,
+                kindGuess: kind,
+                groupKey: "call:\(relativePath):\(statementOffset)"
+            ))
+        }
     }
 
     private func recordControlSite(callName: String, call: FunctionCallExprSyntax) {
@@ -322,8 +412,8 @@ private final class AccessibilityVisitor: SyntaxVisitor {
         while let expr = current, steps < 64 {
             steps += 1
             if let inner = expr.as(FunctionCallExprSyntax.self) {
-                if let name = Self.simpleCallName(inner.calledExpression),
-                   ControlKnowledge.swiftUIControls.contains(name) {
+                if let name = SyntaxText.simpleCallName(inner.calledExpression),
+                   ControlKnowledge.swiftUIKinds.contains(name) {
                     return name
                 }
                 current = inner.calledExpression
@@ -344,14 +434,14 @@ private final class AccessibilityVisitor: SyntaxVisitor {
         if let lhsRoot, let declared = propertyKinds[lhsRoot] {
             return declared
         }
-        if let type = ctx.variableTypeText, ControlKnowledge.uiKitControls.contains(type) {
+        if let type = ctx.variableTypeText, ControlKnowledge.uiKitKinds.contains(type) {
             return type
         }
         // Look for a constructor call in the statement: `x = UIButton(type: .system)`.
         for element in statement.elements {
             if let call = element.as(FunctionCallExprSyntax.self),
-               let name = Self.simpleCallName(call.calledExpression),
-               ControlKnowledge.uiKitControls.contains(name) {
+               let name = SyntaxText.simpleCallName(call.calledExpression),
+               ControlKnowledge.uiKitKinds.contains(name) {
                 return name
             }
         }
@@ -430,7 +520,7 @@ func enclosingContext(of node: some SyntaxProtocol) -> EnclosingContext {
                 }
                 if ctx.variableTypeText == nil {
                     if let typeText = variable.bindings.first?.typeAnnotation?.type.description {
-                        ctx.variableTypeText = SelfTrimming.trimmed(typeText)
+                        ctx.variableTypeText = SyntaxText.trimmedTypeName(typeText)
                     }
                 }
             }
@@ -445,52 +535,16 @@ func enclosingContext(of node: some SyntaxProtocol) -> EnclosingContext {
     return ctx
 }
 
-enum SelfTrimming {
-    /// Trim optionals/generics and take the last path component of a type name:
-    /// `UIButton!` -> `UIButton`, `UIKit.UIButton` -> `UIButton`.
-    static func trimmed(_ text: String) -> String {
-        var t = text
-        while t.hasSuffix("?") || t.hasSuffix("!") { t.removeLast() }
-        if let generic = t.firstIndex(of: "<") { t = String(t[..<generic]) }
-        if let dot = t.lastIndex(of: ".") { t = String(t[t.index(after: dot)...]) }
-        return t
-    }
-}
 
 extension AccessibilityVisitor {
-    /// The first string-literal argument of a call, when statically known.
-    static func firstStringLiteral(in arguments: LabeledExprListSyntax) -> String? {
-        for argument in arguments {
-            if let literal = argument.expression.as(StringLiteralExprSyntax.self) {
-                return literalText(literal)
-            }
+    /// The first argument's statically known value: a plain string literal,
+    /// or the unresolved member chain of a constant reference.
+    static func argumentValue(in arguments: LabeledExprListSyntax) -> (literal: String?, chain: [String]?) {
+        guard let first = arguments.first else { return (nil, nil) }
+        if let literal = first.expression.as(StringLiteralExprSyntax.self) {
+            return (SyntaxText.plainLiteral(literal), nil)
         }
-        return nil
-    }
-
-    /// Concatenate plain string segments; nil for interpolated/dynamic literals.
-    static func literalText(_ literal: StringLiteralExprSyntax) -> String? {
-        var text = ""
-        for segment in literal.segments {
-            switch segment {
-            case .stringSegment(let segment):
-                text += segment.content.text
-            default:
-                return nil
-            }
-        }
-        return text
-    }
-
-    /// Simple call name for `Foo(...)` or `Module.Foo(...)`.
-    static func simpleCallName(_ expression: ExprSyntax) -> String? {
-        if let ref = expression.as(DeclReferenceExprSyntax.self) {
-            return ref.baseName.text
-        }
-        if let member = expression.as(MemberAccessExprSyntax.self) {
-            return member.declName.baseName.text
-        }
-        return nil
+        return (nil, SyntaxText.memberChain(first.expression))
     }
 
     /// Innermost base property name of a member-access chain, e.g. for

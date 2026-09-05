@@ -32,10 +32,11 @@ enum Fixture {
 
     /// Crawl a fixture tree and scan tests in one go, like the CLI does.
     static func crawl(root: URL, testGlobs: [String] = ["*Tests*"], excludes: [String] = []) throws -> BreadcrumbMap {
-        let (elements, missing) = try Crawler().crawl(root: root, excludes: excludes)
+        let (elements, missing, constants) = try Crawler().crawl(root: root, excludes: excludes)
         let known = Set(elements.map(\.identifier))
         let (tests, orphans) = try TestScanner().scan(
-            root: root, globs: testGlobs, excludes: excludes, knownIdentifiers: known
+            root: root, globs: testGlobs, excludes: excludes,
+            knownIdentifiers: known, constants: constants
         )
         return BreadcrumbMap(
             sourceRoot: root.path,

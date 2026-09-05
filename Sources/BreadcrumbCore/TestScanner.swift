@@ -4,7 +4,13 @@ import SwiftParser
 
 /// Reverse index: scans test/automation sources for string literals that match
 /// known element identifiers, and tracks orphan literals — identifier-shaped
-/// strings that match no known element (typos, removed elements, debt).
+/// strings in UI-query positions (`app.buttons["id"]`, identifier/matching
+/// call arguments) that match no known element (typos, removed elements,
+/// debt).
+///
+/// Constant references resolve too: tests written against a constant table
+/// (`app.buttons[A11yIdentifiers.roomScreen.name]`) index exactly like string
+/// literals, using the table built during the crawl.
 public struct TestScanner {
     public init() {}
 
@@ -13,11 +19,14 @@ public struct TestScanner {
     ///   - globs: glob patterns deciding which files are "test/automation" files
     ///     (default `*Tests*`).
     ///   - identifiers: known element identifiers from the crawl.
+    ///   - constants: the constant table built during the crawl (resolves
+    ///     `A11yIdentifiers.…` references in tests).
     public func scan(
         root: URL,
         globs: [String],
         excludes: [String],
-        knownIdentifiers: Set<String>
+        knownIdentifiers: Set<String>,
+        constants: ConstantTable = ConstantTable()
     ) throws -> (tests: [ElementTests], orphans: [OrphanLiteral]) {
         let files = try SourceTree.swiftFiles(under: root, excludes: excludes)
             .filter { Glob.matchesAny(path: $0, patterns: globs) }
@@ -29,20 +38,17 @@ public struct TestScanner {
             let source = SourceTree.readSource(at: readRoot.appendingPathComponent(relative))
             let tree = Parser.parse(source: source)
             let lineIndex = LineIndex(source)
-            let visitor = StringLiteralVisitor()
+            let visitor = LiteralVisitor(constants: constants, source: source)
             visitor.walk(tree)
-            for literal in visitor.literals {
-                guard let value = literal.value else { continue } // dynamic literals: skip
+            for found in visitor.found {
+                guard let value = found.value else { continue } // dynamic literals: skip
                 if knownIdentifiers.contains(value) {
-                    let position = lineIndex.lineColumn(utf8Offset: literal.utf8Offset)
                     usages[value, default: []].append(
-                        TestReference(file: relative, line: position.line, column: position.column)
+                        TestReference(file: relative, line: found.line, column: found.column)
                     )
-                } else if Self.isIdentifierShaped(value) {
-                    let position = lineIndex.lineColumn(utf8Offset: literal.utf8Offset)
+                } else if found.isQueryContext, Self.isIdentifierShaped(value) {
                     orphans.append(OrphanLiteral(
-                        literal: value, file: relative,
-                        line: position.line, column: position.column
+                        literal: value, file: relative, line: found.line, column: found.column
                     ))
                 }
             }
@@ -58,8 +64,8 @@ public struct TestScanner {
     /// Heuristic for "this string literal looks like an accessibility identifier":
     /// - dotted with at least two segments (`settings.notifications`), or
     /// - lowercase snake_case of 5+ characters (`login_button`).
-    /// Documented in the README as intentionally broad — orphans are leads, not
-    /// verdicts.
+    /// Only applied to query-position strings: shape alone proved too broad on
+    /// a real codebase (file names, bundle IDs and domains all look dotted).
     public static func isIdentifierShaped(_ value: String) -> Bool {
         guard !value.isEmpty, value.count >= 5, value.count <= 128 else { return false }
         guard value.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" || $0 == "." || $0 == "-" }) else { return false }
@@ -75,21 +81,31 @@ public struct TestScanner {
     }
 }
 
-/// Collects plain string literals from a syntax tree.
-private final class StringLiteralVisitor: SyntaxVisitor {
+/// Collects string literals and resolvable constant references from a test
+/// syntax tree, remembering whether each literal sits in a UI-query position.
+private final class LiteralVisitor: SyntaxVisitor {
     struct Found {
         var value: String?
-        var utf8Offset: Int
+        var line: Int
+        var column: Int
+        /// True for `app.buttons["…"]` subscripts and identifier/matching call
+        /// arguments — the positions where a literal is being *used as* an
+        /// element identifier. Orphan reporting is restricted to these;
+        /// arbitrary dotted strings elsewhere proved to be 95% noise (P0).
+        var isQueryContext: Bool
     }
-    var literals: [Found] = []
 
-    init() {
+    var found: [Found] = []
+    private let constants: ConstantTable
+    private let lineIndex: LineIndex
+
+    init(constants: ConstantTable, source: String) {
+        self.constants = constants
+        self.lineIndex = LineIndex(source)
         super.init(viewMode: .sourceAccurate)
     }
 
     override func visit(_ node: StringLiteralExprSyntax) -> SyntaxVisitorContinueKind {
-        // Skip interpolated literals for matching purposes but still keep them
-        // out entirely (value == nil) so orphans don't false-positive.
         var text = ""
         var isPlain = true
         for segment in node.segments {
@@ -100,7 +116,49 @@ private final class StringLiteralVisitor: SyntaxVisitor {
                 isPlain = false
             }
         }
-        literals.append(Found(value: isPlain ? text : nil, utf8Offset: node.positionAfterSkippingLeadingTrivia.utf8Offset))
+        let position = lineIndex.lineColumn(
+            utf8Offset: node.positionAfterSkippingLeadingTrivia.utf8Offset
+        )
+        found.append(Found(
+            value: isPlain ? text : nil,
+            line: position.line,
+            column: position.column,
+            isQueryContext: Self.isQueryPosition(node)
+        ))
         return .skipChildren
+    }
+
+    /// Constant references: `A11yIdentifiers.roomScreen.name` anywhere in the
+    /// test resolves through the crawl's constant table.
+    override func visit(_ node: DeclReferenceExprSyntax) -> SyntaxVisitorContinueKind {
+        let rootName = SyntaxText.normalizedName(node.baseName.text)
+        guard constants.rootTypeNames.contains(rootName) else { return .visitChildren }
+        var components = [rootName]
+        var current = node.parent
+        while let member = current?.as(MemberAccessExprSyntax.self) {
+            components.append(SyntaxText.normalizedName(member.declName.baseName.text))
+            current = member.parent
+        }
+        guard let value = constants.resolve(chain: components) else { return .visitChildren }
+        let position = lineIndex.lineColumn(
+            utf8Offset: node.positionAfterSkippingLeadingTrivia.utf8Offset
+        )
+        found.append(Found(value: value, line: position.line, column: position.column, isQueryContext: true))
+        return .visitChildren
+    }
+
+    /// `app.buttons["id"]`, `app.buttons[A11y.id]` → the literal/argument sits
+    /// in a subscript call. `matching("id")`-style identifier queries count too.
+    static func isQueryPosition(_ node: SyntaxProtocol) -> Bool {
+        guard let argument = node.parent?.as(LabeledExprSyntax.self),
+              let list = argument.parent else { return false }
+        // The argument's parent is the labeled-expr *list*; the call is above it.
+        guard let container = list.parent else { return false }
+        if container.is(SubscriptCallExprSyntax.self) { return true }
+        if let call = container.as(FunctionCallExprSyntax.self),
+           let name = SyntaxText.simpleCallName(call.calledExpression) {
+            return ["accessibilityIdentifier", "identifier", "matching", "element", "descendantsMatching"].contains(name)
+        }
+        return false
     }
 }
