@@ -31,7 +31,7 @@
 요구 사항: macOS 13+, Swift 5.9+ 도구체인 (Swift 6.x 포함).
 
 ```bash
-git clone <this-repository>
+git clone https://github.com/ictechgy/locus
 cd locus
 swift build -c release
 # 바이너리: .build/release/locus
