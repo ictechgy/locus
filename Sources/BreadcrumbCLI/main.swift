@@ -4,7 +4,7 @@ import BreadcrumbCore
 let version = MapFormat.releaseVersion
 
 let helpText = """
-breadcrumb 0.1.0 — a map between UI elements and source for agents.
+breadcrumb \(version) — a map between UI elements and source for agents.
 
 USAGE:
     breadcrumb crawl <sourceRoot> [--tests-glob G]... [--exclude P]... [--out DIR]
@@ -35,7 +35,13 @@ COMMANDS:
                            accessibilityIdentifier, per file.
     mcp                    Serve the map as a stdio MCP server (JSON-RPC 2.0)
                            with tools: where_is, what_renders, affected_tests,
-                           missing_identifiers. Exits 0 on EOF.
+                           missing_identifiers, match_snapshot. Exits 0 on EOF.
+    snapshot               Match a runtime accessibility-tree dump (JSON)
+                           against the map: identifier direct-match (high),
+                           label heuristic (medium/low), residual report.
+        <dump.json> | -    dump file, or - to read the dump from stdin
+        --udid UDID        capture the dump via `idb ui describe-all` instead
+        --out DIR          map directory (default ./.breadcrumb)
 
 DEFAULTS:
     Map lives in ./.breadcrumb. Run crawl once, then query from the same
@@ -107,6 +113,8 @@ func run(_ arguments: [String]) -> Int32 {
         return runAffectedTests(rest)
     case "missing-identifiers":
         return runMissingIdentifiers(rest)
+    case "snapshot":
+        return runSnapshot(rest)
     case "mcp":
         return runMCP(rest)
     default:
@@ -132,12 +140,12 @@ func runCrawl(_ arguments: [String]) -> Int32 {
 
     do {
         let crawler = Crawler()
-        let (elements, missing) = try crawler.crawl(root: sourceRoot, excludes: excludes)
+        let (elements, missing, constants) = try crawler.crawl(root: sourceRoot, excludes: excludes)
         let knownIdentifiers = Set(elements.map(\.identifier))
         let scanner = TestScanner()
         let (tests, orphans) = try scanner.scan(
             root: sourceRoot, globs: testGlobs, excludes: excludes,
-            knownIdentifiers: knownIdentifiers
+            knownIdentifiers: knownIdentifiers, constants: constants
         )
         let map = BreadcrumbMap(
             sourceRoot: sourceRoot.path,
@@ -220,6 +228,39 @@ func runMissingIdentifiers(_ arguments: [String]) -> Int32 {
         let engine = try Engine.load(mapDirectory: args.value("out"), workingDirectory: currentDirectory())
         let result = engine.missingIdentifiers()
         print(result.breadcrumbJSON())
+        return 0
+    } catch {
+        fail("\(error)")
+    }
+}
+
+// MARK: - snapshot
+
+func runSnapshot(_ arguments: [String]) -> Int32 {
+    let args = parse(arguments)
+    let dumpText: String
+    if let udid = args.value("udid") {
+        do {
+            dumpText = try SnapshotCapture.idbDescribeAll(udid: udid)
+        } catch {
+            fail("\(error)")
+        }
+    } else if let path = args.positional.first {
+        if path == "-" {
+            dumpText = String(decoding: FileHandle.standardInput.readDataToEndOfFile(), as: UTF8.self)
+        } else {
+            guard let text = try? String(contentsOfFile: path, encoding: .utf8) else {
+                fail("cannot read snapshot dump at '\(path)'.")
+            }
+            dumpText = text
+        }
+    } else {
+        fail("snapshot requires a <dump.json> path, '-' for stdin, or --udid <udid>.")
+    }
+    do {
+        let engine = try Engine.load(mapDirectory: args.value("out"), workingDirectory: currentDirectory())
+        let report = try engine.matchSnapshot(dump: dumpText)
+        print(report.breadcrumbJSON())
         return 0
     } catch {
         fail("\(error)")

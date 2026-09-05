@@ -75,6 +75,9 @@ public final class MCPEngine {
                 payload = try engine.affectedTests(ref: ref, files: files)
             case "missing_identifiers":
                 payload = engine.missingIdentifiers()
+            case "match_snapshot":
+                let dump = try stringArgument(arguments, "dump", tool: name)
+                payload = try engine.matchSnapshot(dump: dump)
             default:
                 return render(id: id, error: rpcError(-32602, "Unknown tool: \(name)"))
             }
@@ -114,7 +117,7 @@ public final class MCPEngine {
         var schema: [String: Any]
     }
 
-    public var toolNames: [String] { ["where_is", "what_renders", "affected_tests", "missing_identifiers"] }
+    public var toolNames: [String] { ["where_is", "what_renders", "affected_tests", "missing_identifiers", "match_snapshot"] }
 
     func toolDescriptors() -> [[String: Any]] {
         [
@@ -148,6 +151,13 @@ public final class MCPEngine {
                 name: "missing_identifiers",
                 description: "Interactive-looking controls with no accessibilityIdentifier, grouped per file — the team's automation debt.",
                 schema: objectSchema(required: [], properties: [:])
+            ),
+            ToolDescriptor(
+                name: "match_snapshot",
+                description: "Match a runtime accessibility-tree dump (JSON array of elements, from idb ui describe-all, XCUITest, or similar) against the static map: identifier direct-match (high), label heuristic (medium/low), plus residual report (unidentified on-screen nodes, unknown identifiers).",
+                schema: objectSchema(required: ["dump"], properties: [
+                    "dump": ["type": "string", "description": "the accessibility-tree dump as JSON text (array of element objects, or an object with an `elements` array)"],
+                ])
             ),
         ].map { descriptor in
             [

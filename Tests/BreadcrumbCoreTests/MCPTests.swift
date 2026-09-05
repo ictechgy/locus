@@ -41,7 +41,7 @@ final class MCPTests: XCTestCase {
         XCTAssertEqual(result["protocolVersion"] as? String, "2024-11-05")
         let serverInfo = try XCTUnwrap(result["serverInfo"] as? [String: Any])
         XCTAssertEqual(serverInfo["name"] as? String, "breadcrumb")
-        XCTAssertEqual(serverInfo["version"] as? String, "0.1.0")
+        XCTAssertEqual(serverInfo["version"] as? String, MapFormat.releaseVersion)
         let capabilities = try XCTUnwrap(result["capabilities"] as? [String: Any])
         XCTAssertNotNil(capabilities["tools"])
     }
@@ -50,14 +50,14 @@ final class MCPTests: XCTestCase {
         XCTAssertNil(engine.handle(line: #"{"jsonrpc":"2.0","method":"notifications/initialized"}"#))
     }
 
-    func testToolsListHasFourTools() throws {
+    func testToolsListHasFiveTools() throws {
         _ = engine.handle(line: #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#)
         let response = try json(engine.handle(line: #"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#))
         let result = try XCTUnwrap(response["result"] as? [String: Any])
         let tools = try XCTUnwrap(result["tools"] as? [[String: Any]])
         XCTAssertEqual(
             Set(tools.compactMap { $0["name"] as? String }),
-            ["where_is", "what_renders", "affected_tests", "missing_identifiers"]
+            ["where_is", "what_renders", "affected_tests", "missing_identifiers", "match_snapshot"]
         )
         for tool in tools {
             let schema = try XCTUnwrap(tool["inputSchema"] as? [String: Any])

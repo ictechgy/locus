@@ -6,15 +6,16 @@
 ## 이 저장소는 (30초 요약)
 
 iOS 접근성 요소 ↔ Swift 소스 코드의 정적 트레이스빌리티 맵. SwiftSyntax로
-`accessibilityIdentifier`/`accessibilityLabel`을 크롤하고, UI 테스트의 식별자
-문자열을 역색인해 양방향 질의(CLI + MCP 4툴)에 답한다. **LLM 불요, 완전 로컬,
-맵 출력은 바이트 단위 결정적**이 계약이다.
+`accessibilityIdentifier`/`accessibilityLabel`(리터럴·상수·레이블드 인자)을
+크롤하고, UI 테스트의 식별자 참조를 역색인해 양방향 질의(CLI + MCP 5툴)에
+답한다. 런타임 접근성 트리 덤프를 맵과 매칭하는 동적 스냅샷(`snapshot`)도
+있다. **LLM 불요, 완전 로컬, 맵 출력은 바이트 단위 결정적**이 계약이다.
 
 ## 명령 (반드시 저장소 루트에서)
 
 ```bash
 swift build            # 증분 빌드, 수 초 (의존성 swift-syntax는 이미 checkout됨)
-swift test             # 30개 XCTest, 수 초. 커밋 전 필수
+swift test             # 50개 XCTest, 수 초. 커밋 전 필수
 swift build -c release # 주의: 첫 릴리스 빌드는 swift-syntax 컴파일로 수 분.
                        # 반드시 run_in_background로 돌리고 짧게 폴링할 것 —
                        # 긴 블로킹 호출은 세션 타임아웃을 유발한다
@@ -30,16 +31,26 @@ make test / make release
 Sources/BreadcrumbCore/       라이브러리 타깃 — 모든 로직은 여기에
   Models.swift                도메인 타입(ElementRecord·MissingIdentifier·BreadcrumbMap)
                               + MapFormat(버전 단일 소스: releaseVersion)
-  Crawler.swift               SwiftSyntax 비지터 — SwiftUI 수정자 호출 + UIKit 대입 추출,
-                              RawHit 병합, 심볼 앵커(구문 컨텍스트 기반), kind 추정
-  TestScanner.swift           역색인 — 테스트 경로의 문자열 리터럴 ↔ 식별자 정확 일치,
-                              identifier-shaped 고아 리터럴(orphan) 수집
-  Engine.swift                질의 엔진(whereIs·whatRenders·affectedTests·missingIdentifiers)
+  Crawler.swift               SwiftSyntax 비지터 — SwiftUI 수정자·레이블드 인자 호출 +
+                              UIKit 대입 추출, RawHit 병합, 심볼 앵커, kind 추정,
+                              인터랙티브 컨트롤만 missing 대상
+  ConstantTable.swift         정적 상수 해석 — enum/struct 멤버 리터럴, String raw-value
+                              enum(암시 케이스명 포함), 네임스페이스 별칭
+                              (static let ns = Type()), 백틱 멤버 정규화. 실전 앱의
+                              식별자 대부분이 상수 형태임(P0 실측)
+  TestScanner.swift           역색인 — 테스트의 문자열 리터럴 + 상수 참조 ↔ 식별자
+                              정확 일치, orphan은 UI-쿼리 위치로 제한(형태만으론
+                              파일명·번들ID와 구분 불가 — 실측 노이즈 95%)
+  Snapshot.swift              동적 스냅샷 — 덤프 파싱(필드 별칭), idb 캡처(선택 의존),
+                              매처(identifier high / 고유 라벨 medium·low, 잔차·커버리지)
+  Engine.swift                질의 엔진(whereIs·whatRenders·affectedTests·
+                              missingIdentifiers·matchSnapshot)
                               + repoRelativePrefix(경로 기준계 정렬 — 아래 불변식 5)
-  GitDiff.swift               git 읽기 전용 연동 — 파이프 동시 drain 필수(교착 방지)
+  GitDiff.swift               git 읽기 전용 연동 — 파이프 동시 drain 필수(교착 방지),
+                              /usr/bin/git 우선(GUI 앱 PATH 문제), option-like ref 거부
   Glob.swift                  최소 글롭(* ? **). SourceTree — 숨김/빌드 디렉터리 제외 순회
   MapStore.swift              .breadcrumb/ 5개 JSON — 원자적 쓰기(temp+rename), 결정적 바이트
-  MCPEngine.swift             손작성 stdio JSON-RPC 2.0 + 4툴. MCPStdio.run = 루프
+  MCPEngine.swift             손작성 stdio JSON-RPC 2.0 + 5툴. MCPStdio.run = 루프
 Sources/BreadcrumbCLI/main.swift  CLI 엔트리(top-level). 로직 추가 금지, 코어로
 Tests/BreadcrumbCoreTests/    XCTest. FixtureSupport가 temp 트리·git 드라이버 제공
 Examples/DemoApp/             README 트랜스크립트의 입력 (부모 저장소에 일반 파일로 추적)

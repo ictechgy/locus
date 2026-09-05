@@ -144,6 +144,20 @@ public struct Engine {
         (lhs.file, lhs.line, lhs.column, lhs.identifier) < (rhs.file, rhs.line, rhs.column, rhs.identifier)
     }
 
+    // MARK: - snapshot
+
+    /// Match a runtime accessibility-tree dump against the static ledger.
+    /// Identifier direct matches are `high`; unique label matches `medium`;
+    /// everything else lands in the residuals — which are the point.
+    public func matchSnapshot(nodes: [SnapshotNode]) -> SnapshotMatcher.Report {
+        SnapshotMatcher().match(nodes: nodes, elements: map.elements)
+    }
+
+    /// Parse and match in one step (CLI/MCP shared path).
+    public func matchSnapshot(dump: String) throws -> SnapshotMatcher.Report {
+        matchSnapshot(nodes: try SnapshotDump.parse(dump))
+    }
+
     // MARK: - missing-identifiers
 
     public struct MissingIdentifiersResult: Codable, Equatable {
