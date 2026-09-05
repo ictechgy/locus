@@ -10,8 +10,9 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-      - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer
+      # No Xcode pin: runner images rotate bundled Xcode versions, and the
+      # package builds on any Swift 5.9+ toolchain (swift-syntax 600.x in
+      # Swift 5 language mode).
       - name: Build (debug)
         run: swift build
       - name: Test
