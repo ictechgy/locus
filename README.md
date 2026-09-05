@@ -44,11 +44,14 @@ swift build -c release
 
 ## Quickstart
 
-`Examples/DemoApp`은 자체 git 저장소(초기 커밋 + 커밋되지 않은 변경 1개)를 가진
-데모 앱 소스다. 그대로 따라할 수 있다.
+`Examples/DemoApp`은 SwiftUI + UIKit + UI 테스트 소스를 담은 데모 앱이다.
+4번(git 기반 affected-tests)을 그대로 따라하려면 먼저 `Scripts/setup-demo.sh`로
+데모용 임시 git 환경을 만들고(초기 커밋 + 커밋되지 않은 변경 1개), git 없이
+시도하려면 `affected-tests --files Sources/ProfileView.swift`로 대체한다.
 
 ```console
 $ cd Examples/DemoApp
+$ ../../Scripts/setup-demo.sh   # git 기반 데모용 (선택)
 
 # 1. 크롤 — 정적 맵 + 테스트 역색인 (결과는 .breadcrumb/ 에 원자적 기록)
 $ breadcrumb crawl .
@@ -172,6 +175,10 @@ Cursor (`~/.cursor/mcp.json`): 동일한 형식.
   나오므로 반영되지 않는다. 명시적 `--files`로 보완 가능.
 - **역색인 리터럴 매칭은 정확 일치** — 테스트의 오탈자 식별자는 `orphans.json`
   에 잔차로 잡힌다(존재하지 않는 식별자 모양 문자열). 발견이 곧 가치.
+- **데모의 내부 git은 선택** — DemoApp 소스는 이 저장소에 일반 파일로
+  포함되어 있다. `Scripts/setup-demo.sh`가 임시 내부 git을 만들며, 그때부터
+  부모 저장소의 `git status`에 `m Examples/DemoApp`이 보인다(데모 설계상
+  의도). 없애려면 `Examples/DemoApp/.git`을 삭제하면 된다.
 
 ## 차별화·경계
 

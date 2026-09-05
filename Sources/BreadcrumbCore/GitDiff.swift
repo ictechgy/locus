@@ -40,7 +40,9 @@ public enum GitDiff {
         return stdout.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Run a git command, capturing stdout/stderr.
+    /// Run a git command, capturing stdout/stderr. Both pipes are drained
+    /// concurrently — reading stdout to EOF while git fills the 64KB stderr
+    /// pipe would deadlock a sequential drain.
     public static func run(arguments: [String], workingDirectory: URL) -> (exit: Int32, stdout: String, stderr: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
@@ -55,8 +57,15 @@ public enum GitDiff {
         } catch {
             return (-1, "", "failed to launch git: \(error.localizedDescription)")
         }
+        let group = DispatchGroup()
+        var errData = Data()
+        group.enter()
+        DispatchQueue.global().async {
+            errData = stderr.fileHandleForReading.readDataToEndOfFile()
+            group.leave()
+        }
         let outData = stdout.fileHandleForReading.readDataToEndOfFile()
-        let errData = stderr.fileHandleForReading.readDataToEndOfFile()
+        group.wait()
         process.waitUntilExit()
         return (
             process.terminationStatus,
