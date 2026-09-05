@@ -1,6 +1,6 @@
 import Foundation
 
-/// Reads and writes the breadcrumb map under `.breadcrumb/` (or a custom
+/// Reads and writes the locus map under `.locus/` (or a custom
 /// `--out` directory). Writes are atomic (temp file + rename) and the content
 /// is deterministic: same inputs, same bytes — no timestamps, sorted arrays,
 /// sorted JSON keys.
@@ -34,7 +34,7 @@ public enum MapStore {
 
     // MARK: - Write
 
-    public static func write(_ map: BreadcrumbMap, index: Index, to directory: URL) throws {
+    public static func write(_ map: LocusMap, index: Index, to directory: URL) throws {
         let fm = FileManager.default
         try fm.createDirectory(at: directory, withIntermediateDirectories: true)
         try writeAtomic(encode(map.elements), to: directory.appendingPathComponent(elementsFile))
@@ -66,14 +66,14 @@ public enum MapStore {
 
     // MARK: - Read
 
-    public static func load(from directory: URL) throws -> (map: BreadcrumbMap, index: Index?) {
+    public static func load(from directory: URL) throws -> (map: LocusMap, index: Index?) {
         let elements = try read([ElementRecord].self, directory.appendingPathComponent(elementsFile)) ?? []
         let tests = try read([ElementTests].self, directory.appendingPathComponent(testsFile)) ?? []
         let orphans = try read([OrphanLiteral].self, directory.appendingPathComponent(orphansFile)) ?? []
         let missing = try read([MissingIdentifier].self, directory.appendingPathComponent(missingFile)) ?? []
         let index: Index? = try read(Index.self, directory.appendingPathComponent(indexFile))
         let sourceRoot = index?.sourceRoot ?? directory.path
-        let map = BreadcrumbMap(
+        let map = LocusMap(
             sourceRoot: sourceRoot,
             elements: elements, tests: tests, orphans: orphans, missingIdentifiers: missing
         )
@@ -81,7 +81,7 @@ public enum MapStore {
     }
 
     /// Resolve the map directory the same way the CLI does: explicit `--out`
-    /// wins, otherwise `.breadcrumb` relative to the working directory.
+    /// wins, otherwise `.locus` relative to the working directory.
     public static func resolveDirectory(explicit: String?) -> URL {
         if let explicit {
             return URL(fileURLWithPath: explicit, isDirectory: true)

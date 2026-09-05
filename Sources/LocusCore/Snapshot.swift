@@ -23,7 +23,7 @@ public struct SnapshotNode: Codable, Equatable {
 /// a bare JSON array of element objects, or an object with an `elements`
 /// array. Element field names are matched permissively across tool
 /// vocabularies (XCUITest-style, idb `AX…`-style), since agents will hand
-/// breadcrumb dumps from whatever tool they drove the simulator with:
+/// locus dumps from whatever tool they drove the simulator with:
 ///
 /// - identifier ← `identifier` | `AXIdentifier` | `AXUniqueId` |
 ///   `accessibilityIdentifier` (string values only)
@@ -33,7 +33,7 @@ public enum SnapshotDump {
     public static func parse(_ text: String) throws -> [SnapshotNode] {
         guard let data = text.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) else {
-            throw BreadcrumbError("snapshot is not valid JSON.")
+            throw LocusError("snapshot is not valid JSON.")
         }
         let rawElements: [[String: Any]]
         if let array = json as? [[String: Any]] {
@@ -42,7 +42,7 @@ public enum SnapshotDump {
                   let nested = (object["elements"] ?? object["tree"]) as? [[String: Any]] {
             rawElements = nested
         } else {
-            throw BreadcrumbError("snapshot must be a JSON array of elements, or an object with an `elements` array.")
+            throw LocusError("snapshot must be a JSON array of elements, or an object with an `elements` array.")
         }
         return rawElements.enumerated().map { index, fields in
             SnapshotNode(
@@ -64,11 +64,11 @@ public enum SnapshotDump {
 
 /// Read-only `idb ui describe-all` integration (prototype dump source).
 /// idb is optional: when absent the error says so, and file/stdin dumps keep
-/// working — breadcrumb itself never depends on any external tool beyond git.
+/// working — locus itself never depends on any external tool beyond git.
 public enum SnapshotCapture {
     public static func idbDescribeAll(udid: String) throws -> String {
         guard !udid.isEmpty else {
-            throw BreadcrumbError("--udid must not be empty.")
+            throw LocusError("--udid must not be empty.")
         }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
@@ -80,7 +80,7 @@ public enum SnapshotCapture {
         do {
             try process.run()
         } catch {
-            throw BreadcrumbError("failed to launch idb: \(error.localizedDescription). Install it with `pip3 install fb-idb` or use a dump file.")
+            throw LocusError("failed to launch idb: \(error.localizedDescription). Install it with `pip3 install fb-idb` or use a dump file.")
         }
         let group = DispatchGroup()
         var errData = Data()
@@ -94,7 +94,7 @@ public enum SnapshotCapture {
         process.waitUntilExit()
         guard process.terminationStatus == 0 else {
             let message = String(decoding: errData, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-            throw BreadcrumbError("idb describe-all failed: \(message.isEmpty ? "exit \(process.terminationStatus)" : message)")
+            throw LocusError("idb describe-all failed: \(message.isEmpty ? "exit \(process.terminationStatus)" : message)")
         }
         return String(decoding: outData, as: UTF8.self)
     }

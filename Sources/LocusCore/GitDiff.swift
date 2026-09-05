@@ -1,6 +1,6 @@
 import Foundation
 
-/// Git integration through `Process`. breadcrumb never mutates repository
+/// Git integration through `Process`. locus never mutates repository
 /// state; it only reads diffs and status.
 public enum GitDiff {
     public struct Result {
@@ -18,7 +18,7 @@ public enum GitDiff {
             // A ref is data, never a git option: leading "-" could turn it into
             // e.g. `--output=<path>` (argument injection into git).
             guard !ref.hasPrefix("-") else {
-                throw BreadcrumbError("invalid git ref '\(ref)': must not start with '-'.")
+                throw LocusError("invalid git ref '\(ref)': must not start with '-'.")
             }
         }
         let candidates: [[String]] = ref != nil
@@ -37,7 +37,7 @@ public enum GitDiff {
             }
             lastError = stderr.isEmpty ? stdout : stderr
         }
-        throw BreadcrumbError("git diff failed: \(lastError ?? "unknown error"). Is \(workingDirectory.path) inside a git repository?")
+        throw LocusError("git diff failed: \(lastError ?? "unknown error"). Is \(workingDirectory.path) inside a git repository?")
     }
 
     /// `git rev-parse --show-toplevel`, nil when not a repository.

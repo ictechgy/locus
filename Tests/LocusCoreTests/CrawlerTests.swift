@@ -1,5 +1,5 @@
 import XCTest
-@testable import BreadcrumbCore
+@testable import LocusCore
 
 /// Extraction accuracy: identifiers, labels, positions, symbol anchors, kind
 /// guesses, and missing-identifier detection, for both SwiftUI and UIKit.

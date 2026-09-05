@@ -4,6 +4,13 @@
 
 Dynamic snapshot matching: "the element on screen right now" → source.
 
+### Changed
+
+- Renamed **breadcrumb → locus** before first release (2026-09-06 decision):
+  search-uniqueness beats narrative fit. Package, module (`LocusCore`),
+  binary, MCP serverInfo, and the map directory (`.breadcrumb/` → `.locus/`)
+  all renamed. This is the last rename window — the name is final.
+
 ### Added
 
 - `snapshot <dump.json|-> [--udid UDID]`: match a runtime accessibility-tree
@@ -12,7 +19,7 @@ Dynamic snapshot matching: "the element on screen right now" → source.
   on-screen nodes without identifiers (automation debt), identifiers the
   ledger does not know (dynamic identifiers, stale maps), unseen ledger
   identifiers, and a coverage score.
-- `match_snapshot` MCP tool: agents hand breadcrumb a dump from their own
+- `match_snapshot` MCP tool: agents hand locus a dump from their own
   tooling (idb `ui describe-all`, XCUITest, XcodeBuildMCP) and get matched
   sources back — the interop path for UI-drive agents.
 - Dump parsing tolerates common field vocabularies (`identifier`/`AXIdentifier`/
@@ -69,7 +76,7 @@ Initial release. A map between UI elements and source for agents.
   `.accessibilityIdentifier` / `.accessibilityLabel` modifier calls and UIKit
   identifier/label assignments, with syntax-context symbol anchors
   (`Type.member`), kind guesses, and missing-identifier detection. Deterministic,
-  atomically written map under `.breadcrumb/`.
+  atomically written map under `.locus/`.
 - Reverse index of identifier string literals under test paths
   (`--tests-glob`, default `*Tests*`) with orphan-literal tracking.
 - CLI queries: `where-is`, `what-renders`, `affected-tests`

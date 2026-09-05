@@ -2,7 +2,7 @@ import Foundation
 import SwiftSyntax
 import SwiftParser
 
-/// Kind names breadcrumb recognizes as controls.
+/// Kind names locus recognizes as controls.
 public enum ControlKnowledge {
     /// SwiftUI element kinds (kind guessing + label context).
     public static let swiftUIKinds: Set<String> = [

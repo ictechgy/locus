@@ -79,7 +79,7 @@ public enum SourceTree {
         // relative paths incrementally — never by prefix arithmetic, which
         // breaks when enumeration resolves the root differently.
         let resolvedRoot = root.resolvingSymlinksInPath()
-        let alwaysSkip = [".git", ".build", ".swiftpm", "DerivedData", "Pods", ".breadcrumb", "node_modules"]
+        let alwaysSkip = [".git", ".build", ".swiftpm", "DerivedData", "Pods", ".locus", "node_modules"]
 
         func walk(directory: URL, relativePrefix: String) throws {
             let entries = try fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isDirectoryKey])

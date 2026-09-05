@@ -1,6 +1,6 @@
 .DS_Store
 .build/
 .swiftpm/
-.breadcrumb/
+.locus/
 *.xcodeproj
 .tmp/

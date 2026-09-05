@@ -82,10 +82,10 @@ public final class MCPEngine {
                 return render(id: id, error: rpcError(-32602, "Unknown tool: \(name)"))
             }
             return render(id: id, result: [
-                "content": [["type": "text", "text": payload.breadcrumbJSON()]],
+                "content": [["type": "text", "text": payload.locusJSON()]],
                 "isError": false,
             ])
-        } catch let error as BreadcrumbError {
+        } catch let error as LocusError {
             return render(id: id, result: [
                 "content": [["type": "text", "text": "{\"error\": \(jsonQuoted(error.message))}"]],
                 "isError": true,
@@ -100,7 +100,7 @@ public final class MCPEngine {
 
     private func stringArgument(_ arguments: [String: Any], _ key: String, tool: String) throws -> String {
         guard let value = arguments[key] as? String, !value.isEmpty else {
-            throw BreadcrumbError("Invalid params: \(tool) requires a string argument '\(key)'")
+            throw LocusError("Invalid params: \(tool) requires a string argument '\(key)'")
         }
         return value
     }
@@ -185,7 +185,7 @@ public final class MCPEngine {
         [
             "protocolVersion": protocolVersion,
             "capabilities": ["tools": ["listChanged": false]],
-            "serverInfo": ["name": "breadcrumb", "version": MapFormat.releaseVersion],
+            "serverInfo": ["name": "locus", "version": MapFormat.releaseVersion],
         ]
     }
 

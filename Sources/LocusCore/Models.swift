@@ -105,7 +105,7 @@ public struct OrphanLiteral: Codable, Equatable {
 }
 
 /// Top-level map document: deterministic, no timestamps.
-public struct BreadcrumbMap: Codable, Equatable {
+public struct LocusMap: Codable, Equatable {
     public var version: Int
     public var tool: String
     public var sourceRoot: String
@@ -137,13 +137,13 @@ public enum MapFormat {
     public static let version = 1
     /// Single source of truth for the release version (CLI, MCP serverInfo, tool string).
     public static let releaseVersion = "0.3.0"
-    public static let tool = "breadcrumb \(releaseVersion)"
+    public static let tool = "locus \(releaseVersion)"
     /// Default map directory, relative to the current working directory.
-    public static let defaultDirectoryName = ".breadcrumb"
+    public static let defaultDirectoryName = ".locus"
 }
 
 /// An error surfaced to CLI/MCP consumers as a human-readable message.
-public struct BreadcrumbError: Error, CustomStringConvertible {
+public struct LocusError: Error, CustomStringConvertible {
     public let message: String
     public init(_ message: String) { self.message = message }
     public var description: String { message }

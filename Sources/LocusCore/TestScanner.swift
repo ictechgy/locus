@@ -37,7 +37,6 @@ public struct TestScanner {
         for relative in files {
             let source = SourceTree.readSource(at: readRoot.appendingPathComponent(relative))
             let tree = Parser.parse(source: source)
-            let lineIndex = LineIndex(source)
             let visitor = LiteralVisitor(constants: constants, source: source)
             visitor.walk(tree)
             for found in visitor.found {

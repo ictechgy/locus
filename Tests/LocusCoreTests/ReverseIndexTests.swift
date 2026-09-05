@@ -1,5 +1,5 @@
 import XCTest
-@testable import BreadcrumbCore
+@testable import LocusCore
 
 /// Reverse index: literals in test files map back to elements; identifier-
 /// shaped literals matching nothing are orphans.

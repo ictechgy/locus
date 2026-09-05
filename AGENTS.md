@@ -1,4 +1,4 @@
-# AGENTS.md — breadcrumb
+# AGENTS.md — locus
 
 이 저장소에서 작업하는 AI 코딩 에이전트용 지침. 사람 기여자는 [README.md](README.md)와
 [기획서.md](기획서.md)를 먼저 읽을 것. 충돌하면 기획서 > README > 이 파일 순.
@@ -23,13 +23,13 @@ make test / make release
 ```
 
 주의: 셸 작업 디렉터리가 다른 저장소로 남아 있으면 `swift test`가 엉뚱한 패키지를
-돌린다. 항상 `cd /path/to/breadcrumb &&`를 붙이는 습관.
+돌린다. 항상 `cd /path/to/locus &&`를 붙이는 습관.
 
 ## 구조 지도
 
 ```
-Sources/BreadcrumbCore/       라이브러리 타깃 — 모든 로직은 여기에
-  Models.swift                도메인 타입(ElementRecord·MissingIdentifier·BreadcrumbMap)
+Sources/LocusCore/       라이브러리 타깃 — 모든 로직은 여기에
+  Models.swift                도메인 타입(ElementRecord·MissingIdentifier·LocusMap)
                               + MapFormat(버전 단일 소스: releaseVersion)
   Crawler.swift               SwiftSyntax 비지터 — SwiftUI 수정자·레이블드 인자 호출 +
                               UIKit 대입 추출, RawHit 병합, 심볼 앵커, kind 추정,
@@ -49,10 +49,10 @@ Sources/BreadcrumbCore/       라이브러리 타깃 — 모든 로직은 여기
   GitDiff.swift               git 읽기 전용 연동 — 파이프 동시 drain 필수(교착 방지),
                               /usr/bin/git 우선(GUI 앱 PATH 문제), option-like ref 거부
   Glob.swift                  최소 글롭(* ? **). SourceTree — 숨김/빌드 디렉터리 제외 순회
-  MapStore.swift              .breadcrumb/ 5개 JSON — 원자적 쓰기(temp+rename), 결정적 바이트
+  MapStore.swift              .locus/ 5개 JSON — 원자적 쓰기(temp+rename), 결정적 바이트
   MCPEngine.swift             손작성 stdio JSON-RPC 2.0 + 5툴. MCPStdio.run = 루프
-Sources/BreadcrumbCLI/main.swift  CLI 엔트리(top-level). 로직 추가 금지, 코어로
-Tests/BreadcrumbCoreTests/    XCTest. FixtureSupport가 temp 트리·git 드라이버 제공
+Sources/LocusCLI/main.swift  CLI 엔트리(top-level). 로직 추가 금지, 코어로
+Tests/LocusCoreTests/    XCTest. FixtureSupport가 temp 트리·git 드라이버 제공
 Examples/DemoApp/             README 트랜스크립트의 입력 (부모 저장소에 일반 파일로 추적)
 Scripts/setup-demo.sh         데모용 임시 내부 git 생성 — DemoApp에 직접 git init 금지
 ```
@@ -74,7 +74,7 @@ Scripts/setup-demo.sh         데모용 임시 내부 git 생성 — DemoApp에 
 6. **git은 읽기 전용.** `GitDiff`는 diff·rev-parse만 — 상태 변경 명령 금지.
 7. **`Examples/DemoApp`에 `.git`을 만들지 말 것** — `Scripts/setup-demo.sh`만이
    정식 경로. 부모 저장소의 gitlink 회귀를 막는다(히스토리: commit 243da0a).
-8. **`.breadcrumb/`는 런타임 산출물.** 커밋 금지(gitignore됨).
+8. **`.locus/`는 런타임 산출물.** 커밋 금지(gitignore됨).
 
 ## 테스트 관습
 

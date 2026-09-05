@@ -1,5 +1,5 @@
 import XCTest
-@testable import BreadcrumbCore
+@testable import LocusCore
 
 /// Constant-table resolution: production codebases centralize identifiers in
 /// constants (`enum A11yIdentifiers` + namespace structs / raw-value enums).

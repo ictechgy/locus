@@ -1,19 +1,19 @@
 import Foundation
-import BreadcrumbCore
+import LocusCore
 
 let version = MapFormat.releaseVersion
 
 let helpText = """
-breadcrumb \(version) — a map between UI elements and source for agents.
+locus \(version) — a map between UI elements and source for agents.
 
 USAGE:
-    breadcrumb crawl <sourceRoot> [--tests-glob G]... [--exclude P]... [--out DIR]
-    breadcrumb where-is <identifier> [--out DIR]
-    breadcrumb what-renders <symbol|file> [--out DIR]
-    breadcrumb affected-tests [--ref <git-ref>] [--files f1,f2] [--out DIR]
-    breadcrumb missing-identifiers [--out DIR]
-    breadcrumb mcp [--out DIR]
-    breadcrumb --help | --version
+    locus crawl <sourceRoot> [--tests-glob G]... [--exclude P]... [--out DIR]
+    locus where-is <identifier> [--out DIR]
+    locus what-renders <symbol|file> [--out DIR]
+    locus affected-tests [--ref <git-ref>] [--files f1,f2] [--out DIR]
+    locus missing-identifiers [--out DIR]
+    locus mcp [--out DIR]
+    locus --help | --version
 
 COMMANDS:
     crawl                  Build the static map: SwiftSyntax pass over *.swift
@@ -22,7 +22,7 @@ COMMANDS:
                            missing-identifiers.json, index.json atomically.
         --tests-glob G     glob(s) deciding test/automation files (default *Tests*)
         --exclude P        path glob(s) to skip while crawling
-        --out DIR          map directory (default ./.breadcrumb)
+        --out DIR          map directory (default ./.locus)
     where-is               Element(s) with the given accessibility identifier
                            plus the tests that reference it.
     what-renders           Elements anchored in a symbol (Type, Type.member)
@@ -41,15 +41,15 @@ COMMANDS:
                            label heuristic (medium/low), residual report.
         <dump.json> | -    dump file, or - to read the dump from stdin
         --udid UDID        capture the dump via `idb ui describe-all` instead
-        --out DIR          map directory (default ./.breadcrumb)
+        --out DIR          map directory (default ./.locus)
 
 DEFAULTS:
-    Map lives in ./.breadcrumb. Run crawl once, then query from the same
+    Map lives in ./.locus. Run crawl once, then query from the same
     working directory (or pass --out).
 """
 
 func fail(_ message: String) -> Never {
-    FileHandle.standardError.write(Data("breadcrumb: error: \(message)\n".utf8))
+    FileHandle.standardError.write(Data("locus: error: \(message)\n".utf8))
     exit(2)
 }
 
@@ -101,7 +101,7 @@ func run(_ arguments: [String]) -> Int32 {
         print(helpText)
         return 0
     case "--version", "-v", "version":
-        print("breadcrumb \(version)")
+        print("locus \(version)")
         return 0
     case "crawl":
         return runCrawl(rest)
@@ -147,7 +147,7 @@ func runCrawl(_ arguments: [String]) -> Int32 {
             root: sourceRoot, globs: testGlobs, excludes: excludes,
             knownIdentifiers: knownIdentifiers, constants: constants
         )
-        let map = BreadcrumbMap(
+        let map = LocusMap(
             sourceRoot: sourceRoot.path,
             elements: elements, tests: tests, orphans: orphans, missingIdentifiers: missing
         )
@@ -184,7 +184,7 @@ func runWhereIs(_ arguments: [String]) -> Int32 {
     do {
         let engine = try Engine.load(mapDirectory: args.value("out"), workingDirectory: currentDirectory())
         let result = try engine.whereIs(identifier)
-        print(result.breadcrumbJSON())
+        print(result.locusJSON())
         return 0
     } catch {
         fail("\(error)")
@@ -199,7 +199,7 @@ func runWhatRenders(_ arguments: [String]) -> Int32 {
     do {
         let engine = try Engine.load(mapDirectory: args.value("out"), workingDirectory: currentDirectory())
         let result = try engine.whatRenders(target)
-        print(result.breadcrumbJSON())
+        print(result.locusJSON())
         return 0
     } catch {
         fail("\(error)")
@@ -215,7 +215,7 @@ func runAffectedTests(_ arguments: [String]) -> Int32 {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
         let result = try engine.affectedTests(ref: args.value("ref"), files: files)
-        print(result.breadcrumbJSON())
+        print(result.locusJSON())
         return 0
     } catch {
         fail("\(error)")
@@ -227,7 +227,7 @@ func runMissingIdentifiers(_ arguments: [String]) -> Int32 {
     do {
         let engine = try Engine.load(mapDirectory: args.value("out"), workingDirectory: currentDirectory())
         let result = engine.missingIdentifiers()
-        print(result.breadcrumbJSON())
+        print(result.locusJSON())
         return 0
     } catch {
         fail("\(error)")
@@ -260,7 +260,7 @@ func runSnapshot(_ arguments: [String]) -> Int32 {
     do {
         let engine = try Engine.load(mapDirectory: args.value("out"), workingDirectory: currentDirectory())
         let report = try engine.matchSnapshot(dump: dumpText)
-        print(report.breadcrumbJSON())
+        print(report.locusJSON())
         return 0
     } catch {
         fail("\(error)")

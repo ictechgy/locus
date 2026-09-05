@@ -4,11 +4,11 @@ import Foundation
 /// these methods; each returns a structured result plus a ready-to-print JSON
 /// rendering, so the two surfaces cannot drift.
 public struct Engine {
-    public var map: BreadcrumbMap
+    public var map: LocusMap
     /// Directory queries are run from (used for git operations).
     public var workingDirectory: URL
 
-    public init(map: BreadcrumbMap, workingDirectory: URL) {
+    public init(map: LocusMap, workingDirectory: URL) {
         self.map = map
         self.workingDirectory = workingDirectory
     }
@@ -16,7 +16,7 @@ public struct Engine {
     public static func load(mapDirectory explicit: String?, workingDirectory: URL) throws -> Engine {
         let directory = MapStore.resolveDirectory(explicit: explicit)
         guard FileManager.default.fileExists(atPath: directory.path) else {
-            throw BreadcrumbError("no map found at \(directory.path). Run `breadcrumb crawl <sourceRoot>` first.")
+            throw LocusError("no map found at \(directory.path). Run `locus crawl <sourceRoot>` first.")
         }
         let (map, _) = try MapStore.load(from: directory)
         return Engine(map: map, workingDirectory: workingDirectory)
@@ -34,7 +34,7 @@ public struct Engine {
     public func whereIs(_ identifier: String) throws -> WhereIsResult {
         let elements = map.elements.filter { $0.identifier == identifier }
         guard !elements.isEmpty else {
-            throw BreadcrumbError("no element has identifier '\(identifier)'. Check the spelling or run `breadcrumb crawl` again.")
+            throw LocusError("no element has identifier '\(identifier)'. Check the spelling or run `locus crawl` again.")
         }
         let tests = map.tests.first { $0.identifier == identifier }?.tests ?? []
         return WhereIsResult(identifier: identifier, elements: elements, tests: tests)
@@ -61,7 +61,7 @@ public struct Engine {
             }
         }
         guard !elements.isEmpty else {
-            throw BreadcrumbError("no known elements anchored in '\(target)'. Try a type, Type.member anchor, or a crawled file path.")
+            throw LocusError("no known elements anchored in '\(target)'. Try a type, Type.member anchor, or a crawled file path.")
         }
         return WhatRendersResult(target: target, elements: elements)
     }
@@ -92,7 +92,7 @@ public struct Engine {
             // Our own map artifacts are not source; never report them.
             let diff = try GitDiff.changedFiles(workingDirectory: workingDirectory, ref: ref)
             repoRoot = diff.repositoryRoot
-            changed = diff.files.filter { !$0.hasPrefix(".breadcrumb/") }
+            changed = diff.files.filter { !$0.hasPrefix(".locus/") }
         }
         // Changed files are repo-root-relative, element files are sourceRoot-relative.
         // Align the frames of reference before matching.
@@ -190,7 +190,7 @@ public struct Engine {
 
 extension Encodable {
     /// Deterministic JSON: sorted keys, pretty printed, POSIX slashes.
-    public func breadcrumbJSON() -> String {
+    public func locusJSON() -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         guard let data = try? encoder.encode(self) else { return "{}" }

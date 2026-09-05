@@ -1,5 +1,5 @@
 import XCTest
-@testable import BreadcrumbCore
+@testable import LocusCore
 
 /// Query engine semantics on a loaded map.
 final class EngineTests: XCTestCase {

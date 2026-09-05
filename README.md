@@ -1,9 +1,11 @@
-# breadcrumb
+# locus
 
 > **에이전트에게 화면과 코드 사이의 지도를 줘라.**
 > (Give your agent a map between the screen and the code.)
+>
+> *locus — where every UI element lives in source.*
 
-**breadcrumb**은 iOS 앱의 접근성 요소(accessibility element)와 Swift 소스 코드 사이의
+**locus**는 iOS 앱의 접근성 요소(accessibility element)와 Swift 소스 코드 사이의
 정적 트레이스빌리티 맵을 만드는 CLI 도구이자 MCP 서버다. SwiftUI의
 `.accessibilityIdentifier("...")` 수정자와 UIKit의
 `button.accessibilityIdentifier = "..."` 대입을 크롤하고, UI 테스트 안의
@@ -30,16 +32,16 @@
 
 ```bash
 git clone <this-repository>
-cd breadcrumb
+cd locus
 swift build -c release
-# 바이너리: .build/release/breadcrumb
+# 바이너리: .build/release/locus
 ```
 
 빠른 실행:
 
 ```bash
-.build/release/breadcrumb --version
-# breadcrumb 0.1.0
+.build/release/locus --version
+# locus 0.1.0
 ```
 
 ---
@@ -55,15 +57,15 @@ swift build -c release
 $ cd Examples/DemoApp
 $ ../../Scripts/setup-demo.sh   # git 기반 데모용 (선택)
 
-# 1. 크롤 — 정적 맵 + 테스트 역색인 (결과는 .breadcrumb/ 에 원자적 기록)
-$ breadcrumb crawl .
+# 1. 크롤 — 정적 맵 + 테스트 역색인 (결과는 .locus/ 에 원자적 기록)
+$ locus crawl .
   elements:              6
   identifiers in tests:  5
   orphan literals:       1
   missing identifiers:   2
 
 # 2. 요소 → 소스 (+ 이 식별자를 쓰는 테스트)
-$ breadcrumb where-is checkout.pay
+$ locus where-is checkout.pay
 {
   "elements" : [ { "file" : "Sources/CheckoutViewController.swift",
                    "line" : 13, "symbol" : "CheckoutViewController.viewDidLoad",
@@ -72,31 +74,31 @@ $ breadcrumb where-is checkout.pay
 }
 
 # 3. 심볼/파일 → 렌더하는 요소
-$ breadcrumb what-renders CheckoutViewController
+$ locus what-renders CheckoutViewController
 { "elements" : [ "checkout.pay", "checkout.coupon" ] }
 
 # 4. 변경 → 영향받는 테스트 (워킹 트리의 dirty change 기준)
-$ breadcrumb affected-tests
+$ locus affected-tests
 {
   "changedFiles" : [ "Sources/ProfileView.swift" ],
   "tests" : [ { "file" : "Tests/ProfileUITests.swift", "identifier" : "profile.notifications" }, ... ]
 }
 
 # 5. 자동화 부채 — 식별자 없는 컨트롤
-$ breadcrumb missing-identifiers
+$ locus missing-identifiers
 { "total" : 2, "perFile" : [ { "file" : "Sources/ProfileView.swift",
     "findings" : [ { "kind" : "Button", "reason" : "swiftui-call", ... } ] }, ... ] }
 
 # 6. 동적 스냅샷 — 런타임 화면 요소 ↔ 소스 매칭
 #    (덤프는 idb ui describe-all, XCUITest 헬퍼 등 어느 도구에서든; stdin도 가능)
-$ breadcrumb snapshot dump.json
+$ locus snapshot dump.json
 { "coverage" : 0.667, "matches" : [ { "identifier" : "checkout.pay",
     "matchedBy" : "identifier", "confidence" : "high",
     "elements" : [ { "file" : "Sources/CheckoutViewController.swift", "line" : 13, ... } ] },
     ... ], "unidentifiedOnScreen" : [ ... ] }
 
 # 7. MCP 서버 (stdio JSON-RPC 2.0) — 아래 "에이전트 연동" 참고
-$ breadcrumb mcp
+$ locus mcp
 ```
 
 ---
@@ -104,18 +106,18 @@ $ breadcrumb mcp
 ## CLI 레퍼런스
 
 ```
-breadcrumb crawl <sourceRoot> [--tests-glob G]... [--exclude P]... [--out DIR]
-breadcrumb where-is <identifier> [--out DIR]
-breadcrumb what-renders <symbol|file> [--out DIR]
-breadcrumb affected-tests [--ref <git-ref>] [--files f1,f2] [--out DIR]
-breadcrumb missing-identifiers [--out DIR]
-breadcrumb snapshot <dump.json|-> [--udid <udid>] [--out DIR]
-breadcrumb mcp [--out DIR]
+locus crawl <sourceRoot> [--tests-glob G]... [--exclude P]... [--out DIR]
+locus where-is <identifier> [--out DIR]
+locus what-renders <symbol|file> [--out DIR]
+locus affected-tests [--ref <git-ref>] [--files f1,f2] [--out DIR]
+locus missing-identifiers [--out DIR]
+locus snapshot <dump.json|-> [--udid <udid>] [--out DIR]
+locus mcp [--out DIR]
 ```
 
 | 명령 | 설명 |
 |---|---|
-| `crawl` | `sourceRoot` 아래 모든 `*.swift`를 SwiftSyntax로 파싱해 식별자·라벨을 추출하고, 테스트 경로(`--tests-glob`, 기본 `*Tests*`)의 문자열 리터럴과 상수 참조를 역색인한다. `.breadcrumb/` 아래 `elements.json`, `tests.json`, `orphans.json`, `missing-identifiers.json`, `index.json`을 기록한다. 같은 입력이면 항상 같은 바이트(결정적), 임시 파일 + rename 원자적 덮어쓰기. |
+| `crawl` | `sourceRoot` 아래 모든 `*.swift`를 SwiftSyntax로 파싱해 식별자·라벨을 추출하고, 테스트 경로(`--tests-glob`, 기본 `*Tests*`)의 문자열 리터럴과 상수 참조를 역색인한다. `.locus/` 아래 `elements.json`, `tests.json`, `orphans.json`, `missing-identifiers.json`, `index.json`을 기록한다. 같은 입력이면 항상 같은 바이트(결정적), 임시 파일 + rename 원자적 덮어쓰기. |
 | `where-is` | 식별자를 가진 모든 요소(파일:줄:칼럼, 심볼 앵커, 종류, 라벨)와 그 식별자를 참조하는 테스트 목록. |
 | `what-renders` | 타겟을 심볼(`ProfileView`, `ProfileView.avatarToggle`) 또는 파일 경로로 해석해 그 안에 앵커된 요소들을 반환. |
 | `affected-tests` | 변경 파일(기본: 워킹 트리 `git diff HEAD`, `--ref` 지정 시 `git diff <ref>`) → 그 파일에 앵커된 요소 → 중복 제거된 테스트 목록. `--files`로 git 없이 직접 지정도 가능. |
@@ -123,7 +125,7 @@ breadcrumb mcp [--out DIR]
 | `snapshot` | 런타임 접근성 트리 덤프(JSON)를 정적 맵과 매칭. identifier 직매칭(`high`), 고유 라벨 휴리스틱(`medium`, kind 불일치 시 `low`). 잔차 리포트: 화면상 식별자 없는 요소(자동화 부채), 맵에 없는 식별자(동적 식별자·스테일 맵 단서), 화면에 안 보이는 맵 식별자, 커버리지 점수. `--udid` 시 `idb ui describe-all`로 덤프를 직접 캡처(prototype, idb는 선택 의존). |
 | `mcp` | stdio 위 JSON-RPC 2.0 MCP 서버. `initialize` / `tools/list` / `tools/call` 지원, EOF에서 정상 종료. |
 
-지도 위치는 기본 `./.breadcrumb`이고 `--out`으로 바꾼다. 질의는 같은 작업
+지도 위치는 기본 `./.locus`이고 `--out`으로 바꾼다. 질의는 같은 작업
 디렉터리에서(또는 `--out`으로) 실행한다.
 
 ---
@@ -131,15 +133,15 @@ breadcrumb mcp [--out DIR]
 ## 에이전트 연동 (MCP)
 
 Claude Code (`claude_desktop_config.json` / `.mcp.json`) — 쿼리가 지도를 찾을
-위치를 고정하기 위해 CWD 대신 `--out`으로 프로젝트의 `.breadcrumb`를 지정하는
+위치를 고정하기 위해 CWD 대신 `--out`으로 프로젝트의 `.locus`를 지정하는
 것이 이식 가능한 방법:
 
 ```json
 {
   "mcpServers": {
-    "breadcrumb": {
-      "command": "/absolute/path/to/breadcrumb",
-      "args": ["mcp", "--out", "/path/to/your/ios/project/.breadcrumb"]
+    "locus": {
+      "command": "/absolute/path/to/locus",
+      "args": ["mcp", "--out", "/path/to/your/ios/project/.locus"]
     }
   }
 }
@@ -226,11 +228,11 @@ Swift 파일 1,385개)로 검증했다:
 
 ## 차별화·경계
 
-| 인접 | breadcrumb과의 차이 |
+| 인접 | locus와의 차이 |
 |---|---|
 | Arbigent / mobile-mcp / Agent Device | UI 드라이브 자동화. 코드 연결 없음 — 경쟁이 아니라 상위 계층 소비자(드라이브하다 발견한 요소를 `where_is`로). |
 | FixAlly (학술 시제품) | identifier→source 탐색을 a11y 자동수정에 한정. 유지되는 도구가 아니며 역참조·테스트 역색인·에이전트 인터페이스 없음. 정직하게 선행 연구로 인용. |
-| XcodeSelectiveTesting | 타깃/모듈 단위 선택 실행. breadcrumb은 심볼→UI 요소→테스트 단위. |
+| XcodeSelectiveTesting | 타깃/모듈 단위 선택 실행. locus는 심볼→UI 요소→테스트 단위. |
 | Serena / SourceKit-LSP | 소스 심볼 네비게이션. UI 요소·접근성 트리 개념이 없음. |
 | AccessibilitySnapshot (Cash App) | 접근성 계층 스냅샷 회귀 테스트. 소스 매핑·임팩트 질의 없음. |
 
@@ -262,7 +264,7 @@ make release     # 첫 릴리스 빌드는 swift-syntax 컴파일로 수 분 걸
 
 ## English (short)
 
-**breadcrumb** builds a static traceability map between iOS accessibility
+**locus** builds a static traceability map between iOS accessibility
 elements and Swift source, and answers both directions: *which source line
 created this UI element* (`where-is`), *which UI tests does this diff
 affect* (`affected-tests`), and — matching a runtime accessibility-tree dump
@@ -270,7 +272,7 @@ against the map — *which source line created the element on screen right
 now* (`snapshot`). Identifiers centralized in constants (`enum
 A11yIdentifiers` namespaces, raw-value enums) resolve like inline literals.
 It uses SwiftSyntax (no LLM, fully local), writes a deterministic map under
-`.breadcrumb/`, reverse-indexes identifier literals and constant references
+`.locus/`, reverse-indexes identifier literals and constant references
 in your UI tests, reports interactive controls without identifiers, and
 exposes the same queries over a hand-rolled stdio MCP server (JSON-RPC
 2.0) for Claude Code / Cursor. Validated on a 1,385-file production app

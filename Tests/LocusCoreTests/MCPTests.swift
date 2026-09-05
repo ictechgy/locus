@@ -1,5 +1,5 @@
 import XCTest
-@testable import BreadcrumbCore
+@testable import LocusCore
 
 /// MCP server: initialize/tools-list/tools-call handshake driven in-process by
 /// feeding lines to MCPEngine — no socket, no process spawn.
@@ -40,7 +40,7 @@ final class MCPTests: XCTestCase {
         let result = try XCTUnwrap(response["result"] as? [String: Any])
         XCTAssertEqual(result["protocolVersion"] as? String, "2024-11-05")
         let serverInfo = try XCTUnwrap(result["serverInfo"] as? [String: Any])
-        XCTAssertEqual(serverInfo["name"] as? String, "breadcrumb")
+        XCTAssertEqual(serverInfo["name"] as? String, "locus")
         XCTAssertEqual(serverInfo["version"] as? String, MapFormat.releaseVersion)
         let capabilities = try XCTUnwrap(result["capabilities"] as? [String: Any])
         XCTAssertNotNil(capabilities["tools"])

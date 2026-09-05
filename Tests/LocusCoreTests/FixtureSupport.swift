@@ -1,13 +1,13 @@
 import Foundation
 import XCTest
-@testable import BreadcrumbCore
+@testable import LocusCore
 
 /// Shared fixture helpers: temp source trees, marker-based line lookup, and a
 /// tiny git driver for the affected-tests integration test.
 enum Fixture {
     static func makeTree(_ name: String, files: [String: String]) -> URL {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("breadcrumb-tests-\(name)-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("locus-tests-\(name)-\(UUID().uuidString)", isDirectory: true)
         try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         for (relative, content) in files.sorted(by: { $0.key < $1.key }) {
             let url = root.appendingPathComponent(relative)
@@ -31,14 +31,14 @@ enum Fixture {
     }
 
     /// Crawl a fixture tree and scan tests in one go, like the CLI does.
-    static func crawl(root: URL, testGlobs: [String] = ["*Tests*"], excludes: [String] = []) throws -> BreadcrumbMap {
+    static func crawl(root: URL, testGlobs: [String] = ["*Tests*"], excludes: [String] = []) throws -> LocusMap {
         let (elements, missing, constants) = try Crawler().crawl(root: root, excludes: excludes)
         let known = Set(elements.map(\.identifier))
         let (tests, orphans) = try TestScanner().scan(
             root: root, globs: testGlobs, excludes: excludes,
             knownIdentifiers: known, constants: constants
         )
-        return BreadcrumbMap(
+        return LocusMap(
             sourceRoot: root.path,
             elements: elements, tests: tests, orphans: orphans, missingIdentifiers: missing
         )
@@ -54,6 +54,6 @@ enum Fixture {
     }
 
     static func gitIdentity(_ arguments: [String], in directory: URL) -> String {
-        git(["-c", "user.email=test@breadcrumb.local", "-c", "user.name=breadcrumb-test"] + arguments, in: directory)
+        git(["-c", "user.email=test@locus.local", "-c", "user.name=locus-test"] + arguments, in: directory)
     }
 }

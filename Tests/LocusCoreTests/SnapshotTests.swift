@@ -1,5 +1,5 @@
 import XCTest
-@testable import BreadcrumbCore
+@testable import LocusCore
 
 /// Dynamic snapshot matching (v0.3): identifier direct-match, label
 /// heuristic with confidence, and the residual report — where the residual

@@ -1,5 +1,5 @@
 import XCTest
-@testable import BreadcrumbCore
+@testable import LocusCore
 
 /// affected-tests integration: real git repository in a temp directory, dirty
 /// working tree and ref-based diffs both drive the impact query.
@@ -45,7 +45,7 @@ final class AffectedTestsTests: XCTestCase {
         Fixture.git(["add", "."], in: repo)
         Fixture.gitIdentity(["commit", "-m", "init"], in: repo)
         let map = try Fixture.crawl(root: repo)
-        let mapDir = repo.appendingPathComponent(".breadcrumb", isDirectory: true)
+        let mapDir = repo.appendingPathComponent(".locus", isDirectory: true)
         let index = MapStore.Index(
             version: MapFormat.version, tool: MapFormat.tool, sourceRoot: repo.path,
             testGlobs: ["*Tests*"], excludes: [], counts: [:]

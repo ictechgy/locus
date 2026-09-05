@@ -2,13 +2,13 @@
 import PackageDescription
 
 let package = Package(
-    name: "breadcrumb",
+    name: "locus",
     platforms: [
         .macOS(.v13)
     ],
     products: [
-        .executable(name: "breadcrumb", targets: ["BreadcrumbCLI"]),
-        .library(name: "BreadcrumbCore", targets: ["BreadcrumbCore"]),
+        .executable(name: "locus", targets: ["LocusCLI"]),
+        .library(name: "LocusCore", targets: ["LocusCore"]),
     ],
     dependencies: [
         // Pinned to the 600.x line: builds cleanly in Swift 5 language mode even on
@@ -17,22 +17,22 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "BreadcrumbCore",
+            name: "LocusCore",
             dependencies: [
                 .product(name: "SwiftSyntax", package: "swift-syntax"),
                 .product(name: "SwiftParser", package: "swift-syntax"),
             ],
-            path: "Sources/BreadcrumbCore"
+            path: "Sources/LocusCore"
         ),
         .executableTarget(
-            name: "BreadcrumbCLI",
-            dependencies: ["BreadcrumbCore"],
-            path: "Sources/BreadcrumbCLI"
+            name: "LocusCLI",
+            dependencies: ["LocusCore"],
+            path: "Sources/LocusCLI"
         ),
         .testTarget(
-            name: "BreadcrumbCoreTests",
-            dependencies: ["BreadcrumbCore"],
-            path: "Tests/BreadcrumbCoreTests"
+            name: "LocusCoreTests",
+            dependencies: ["LocusCore"],
+            path: "Tests/LocusCoreTests"
         ),
     ]
 )
