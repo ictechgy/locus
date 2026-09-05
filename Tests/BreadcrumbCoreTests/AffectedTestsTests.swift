@@ -94,6 +94,15 @@ final class AffectedTestsTests: XCTestCase {
         XCTAssertTrue(result.affectedElements.isEmpty)
     }
 
+    func testOptionLikeRefIsRejected() throws {
+        // A ref starting with "-" is git argument injection (e.g. --output=);
+        // it must be rejected, never passed through.
+        XCTAssertThrowsError(try engine.affectedTests(ref: "--output=/tmp/evil", files: nil)) { error in
+            XCTAssertTrue("\(error)".contains("invalid git ref"), "got: \(error)")
+        }
+        XCTAssertThrowsError(try engine.affectedTests(ref: "-O/orderfile", files: nil))
+    }
+
     func testRefDiff() throws {
         // Commit a change, then diff against the previous commit via ref.
         let screen = repo.appendingPathComponent("Sources/ProfileView.swift")

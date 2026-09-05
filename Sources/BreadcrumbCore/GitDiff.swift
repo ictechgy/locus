@@ -14,8 +14,15 @@ public enum GitDiff {
     ///   to `git diff --name-only` when the repository has no commits yet.
     ///   Untracked files are not reported (v0.1 limitation, documented).
     public static func changedFiles(workingDirectory: URL, ref: String?) throws -> Result {
+        if let ref {
+            // A ref is data, never a git option: leading "-" could turn it into
+            // e.g. `--output=<path>` (argument injection into git).
+            guard !ref.hasPrefix("-") else {
+                throw BreadcrumbError("invalid git ref '\(ref)': must not start with '-'.")
+            }
+        }
         let candidates: [[String]] = ref != nil
-            ? [["diff", "--name-only", ref!]]
+            ? [["diff", "--name-only", "--end-of-options", ref!]]
             : [["diff", "--name-only", "HEAD"], ["diff", "--name-only"]]
 
         var lastError: String?
@@ -43,10 +50,18 @@ public enum GitDiff {
     /// Run a git command, capturing stdout/stderr. Both pipes are drained
     /// concurrently — reading stdout to EOF while git fills the 64KB stderr
     /// pipe would deadlock a sequential drain.
+    ///
+    /// Uses /usr/bin/git when present: MCP clients launched from GUI apps pass
+    /// a minimal PATH where `env git` lookup can fail even though git exists.
     public static func run(arguments: [String], workingDirectory: URL) -> (exit: Int32, stdout: String, stderr: String) {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["git"] + arguments
+        if FileManager.default.fileExists(atPath: "/usr/bin/git") {
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            process.arguments = arguments
+        } else {
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = ["git"] + arguments
+        }
         process.currentDirectoryURL = workingDirectory
         let stdout = Pipe()
         let stderr = Pipe()
