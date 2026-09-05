@@ -1,0 +1,247 @@
+import Foundation
+import BreadcrumbCore
+
+let version = "0.1.0"
+
+let helpText = """
+breadcrumb 0.1.0 — a map between UI elements and source for agents.
+
+USAGE:
+    breadcrumb crawl <sourceRoot> [--tests-glob G]... [--exclude P]... [--out DIR]
+    breadcrumb where-is <identifier> [--out DIR]
+    breadcrumb what-renders <symbol|file> [--out DIR]
+    breadcrumb affected-tests [--ref <git-ref>] [--files f1,f2] [--out DIR]
+    breadcrumb missing-identifiers [--out DIR]
+    breadcrumb mcp [--out DIR]
+    breadcrumb --help | --version
+
+COMMANDS:
+    crawl                  Build the static map: SwiftSyntax pass over *.swift
+                           under sourceRoot + reverse index of test literals.
+                           Writes elements.json, tests.json, orphans.json,
+                           missing-identifiers.json, index.json atomically.
+        --tests-glob G     glob(s) deciding test/automation files (default *Tests*)
+        --exclude P        path glob(s) to skip while crawling
+        --out DIR          map directory (default ./.breadcrumb)
+    where-is               Element(s) with the given accessibility identifier
+                           plus the tests that reference it.
+    what-renders           Elements anchored in a symbol (Type, Type.member)
+                           or a file.
+    affected-tests         Changed files (git diff, or --files) -> elements ->
+                           deduplicated test list.
+        --ref R            diff against a git ref (default: working tree)
+        --files f1,f2      explicit changed files; overrides git diff
+    missing-identifiers    Interactive-looking controls without an
+                           accessibilityIdentifier, per file.
+    mcp                    Serve the map as a stdio MCP server (JSON-RPC 2.0)
+                           with tools: where_is, what_renders, affected_tests,
+                           missing_identifiers. Exits 0 on EOF.
+
+DEFAULTS:
+    Map lives in ./.breadcrumb. Run crawl once, then query from the same
+    working directory (or pass --out).
+"""
+
+func fail(_ message: String) -> Never {
+    FileHandle.standardError.write(Data("breadcrumb: error: \(message)\n".utf8))
+    exit(2)
+}
+
+struct ParsedArgs {
+    var positional: [String] = []
+    var options: [String: [String]] = [:]
+
+    func value(_ name: String) -> String? { options[name]?.first }
+    func values(_ name: String) -> [String] { options[name] ?? [] }
+    func flag(_ name: String) -> Bool { options[name] != nil }
+}
+
+/// Hand-rolled parsing: `--name value`, `--name=value`, `--flag`, repeated
+/// options collect into lists.
+func parse(_ arguments: [String]) -> ParsedArgs {
+    var parsed = ParsedArgs()
+    var index = 0
+    while index < arguments.count {
+        let token = arguments[index]
+        if token.hasPrefix("--") {
+            let body = String(token.dropFirst(2))
+            if let equals = body.firstIndex(of: "=") {
+                let name = String(body[..<equals])
+                let value = String(body[body.index(after: equals)...])
+                parsed.options[name, default: []].append(value)
+            } else if index + 1 < arguments.count, !arguments[index + 1].hasPrefix("--") {
+                parsed.options[body, default: []].append(arguments[index + 1])
+                index += 1
+            } else {
+                parsed.options[body, default: []].append("true")
+            }
+        } else {
+            parsed.positional.append(token)
+        }
+        index += 1
+    }
+    return parsed
+}
+
+func run(_ arguments: [String]) -> Int32 {
+    guard let command = arguments.first else {
+        print(helpText)
+        return 0
+    }
+    let rest = Array(arguments.dropFirst())
+
+    switch command {
+    case "--help", "-h", "help":
+        print(helpText)
+        return 0
+    case "--version", "-v", "version":
+        print("breadcrumb \(version)")
+        return 0
+    case "crawl":
+        return runCrawl(rest)
+    case "where-is":
+        return runWhereIs(rest)
+    case "what-renders":
+        return runWhatRenders(rest)
+    case "affected-tests":
+        return runAffectedTests(rest)
+    case "missing-identifiers":
+        return runMissingIdentifiers(rest)
+    case "mcp":
+        return runMCP(rest)
+    default:
+        fail("unknown command '\(command)'. Try --help.")
+    }
+}
+
+// MARK: - crawl
+
+func runCrawl(_ arguments: [String]) -> Int32 {
+    let args = parse(arguments)
+    guard !args.positional.isEmpty else {
+        fail("crawl requires a <sourceRoot> directory. Try --help.")
+    }
+    let sourceRoot = URL(fileURLWithPath: args.positional[0], isDirectory: true)
+    var isDirectory: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: sourceRoot.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+        fail("sourceRoot '\(sourceRoot.path)' is not a directory.")
+    }
+    let testGlobs = args.values("tests-glob").isEmpty ? ["*Tests*"] : args.values("tests-glob")
+    let excludes = args.values("exclude")
+    let mapDirectory = MapStore.resolveDirectory(explicit: args.value("out"))
+
+    do {
+        let crawler = Crawler()
+        let (elements, missing) = try crawler.crawl(root: sourceRoot, excludes: excludes)
+        let knownIdentifiers = Set(elements.map(\.identifier))
+        let scanner = TestScanner()
+        let (tests, orphans) = try scanner.scan(
+            root: sourceRoot, globs: testGlobs, excludes: excludes,
+            knownIdentifiers: knownIdentifiers
+        )
+        let map = BreadcrumbMap(
+            sourceRoot: sourceRoot.path,
+            elements: elements, tests: tests, orphans: orphans, missingIdentifiers: missing
+        )
+        let index = MapStore.Index(
+            version: MapFormat.version, tool: MapFormat.tool,
+            sourceRoot: sourceRoot.path, testGlobs: testGlobs, excludes: excludes,
+            counts: [
+                "elements": elements.count,
+                "identifiedTests": tests.count,
+                "orphanLiterals": orphans.count,
+                "missingIdentifiers": missing.count,
+            ]
+        )
+        try MapStore.write(map, index: index, to: mapDirectory)
+        print("crawled \(sourceRoot.path)")
+        print("  elements:              \(elements.count)")
+        print("  identifiers in tests:  \(tests.count)")
+        print("  orphan literals:       \(orphans.count)")
+        print("  missing identifiers:   \(missing.count)")
+        print("  map:                   \(mapDirectory.path)")
+        return 0
+    } catch {
+        fail("\(error)")
+    }
+}
+
+// MARK: - queries
+
+func runWhereIs(_ arguments: [String]) -> Int32 {
+    let args = parse(arguments)
+    guard let identifier = args.positional.first else {
+        fail("where-is requires an <identifier>.")
+    }
+    do {
+        let engine = try Engine.load(mapDirectory: args.value("out"), workingDirectory: currentDirectory())
+        let result = try engine.whereIs(identifier)
+        print(result.breadcrumbJSON())
+        return 0
+    } catch {
+        fail("\(error)")
+    }
+}
+
+func runWhatRenders(_ arguments: [String]) -> Int32 {
+    let args = parse(arguments)
+    guard let target = args.positional.first else {
+        fail("what-renders requires a <symbol|file> target.")
+    }
+    do {
+        let engine = try Engine.load(mapDirectory: args.value("out"), workingDirectory: currentDirectory())
+        let result = try engine.whatRenders(target)
+        print(result.breadcrumbJSON())
+        return 0
+    } catch {
+        fail("\(error)")
+    }
+}
+
+func runAffectedTests(_ arguments: [String]) -> Int32 {
+    let args = parse(arguments)
+    do {
+        let engine = try Engine.load(mapDirectory: args.value("out"), workingDirectory: currentDirectory())
+        let files = args.value("files")?
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        let result = try engine.affectedTests(ref: args.value("ref"), files: files)
+        print(result.breadcrumbJSON())
+        return 0
+    } catch {
+        fail("\(error)")
+    }
+}
+
+func runMissingIdentifiers(_ arguments: [String]) -> Int32 {
+    let args = parse(arguments)
+    do {
+        let engine = try Engine.load(mapDirectory: args.value("out"), workingDirectory: currentDirectory())
+        let result = engine.missingIdentifiers()
+        print(result.breadcrumbJSON())
+        return 0
+    } catch {
+        fail("\(error)")
+    }
+}
+
+// MARK: - mcp
+
+func runMCP(_ arguments: [String]) -> Int32 {
+    let args = parse(arguments)
+    do {
+        let engine = try Engine.load(mapDirectory: args.value("out"), workingDirectory: currentDirectory())
+        let mcp = MCPEngine(engine: engine)
+        return MCPStdio.run(engine: mcp)
+    } catch {
+        fail("\(error)")
+    }
+}
+
+func currentDirectory() -> URL {
+    URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+}
+
+// Entry point: main.swift calls run with command-line arguments.
+exit(run(Array(CommandLine.arguments.dropFirst())))
