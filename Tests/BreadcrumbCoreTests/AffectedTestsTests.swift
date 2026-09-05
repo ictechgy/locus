@@ -106,4 +106,43 @@ final class AffectedTestsTests: XCTestCase {
         XCTAssertEqual(result.changedFiles, ["Sources/ProfileView.swift"])
         XCTAssertEqual(result.tests.count, 2)
     }
+
+    func testNestedSourceRootAvoidsCrossModuleFalsePositives() throws {
+        // sourceRoot nested inside the repo, with a sibling module that shares
+        // file names. Suffix-only matching would report the other module's
+        // change as affecting this module's elements.
+        let nested = Fixture.makeTree("nested", files: [
+            "App/Sources/ProfileView.swift": screenFixture,
+            "Other/Sources/ProfileView.swift": screenFixture,
+            "App/Tests/ProfileUITests.swift": testFixture,
+        ])
+        defer { Fixture.cleanup(nested) }
+        Fixture.git(["-c", "init.defaultBranch=main", "init"], in: nested)
+        Fixture.git(["add", "."], in: nested)
+        Fixture.gitIdentity(["commit", "-m", "init"], in: nested)
+
+        let appDir = nested.appendingPathComponent("App", isDirectory: true)
+        let map = try Fixture.crawl(root: appDir)
+        let nestedEngine = Engine(map: map, workingDirectory: nested)
+        XCTAssertEqual(
+            Engine.repoRelativePrefix(sourceRoot: map.sourceRoot, repoRoot: nested.path, workingDirectory: nested),
+            "App"
+        )
+
+        // Dirty a *different* module's same-named file.
+        let other = nested.appendingPathComponent("Other/Sources/ProfileView.swift")
+        try Data((try String(contentsOf: other, encoding: .utf8) + "\n// tweak elsewhere\n").utf8).write(to: other)
+        let elsewhere = try nestedEngine.affectedTests(ref: nil, files: nil)
+        XCTAssertEqual(elsewhere.changedFiles, ["Other/Sources/ProfileView.swift"])
+        XCTAssertTrue(elsewhere.affectedElements.isEmpty, "cross-module change must not hit App elements")
+
+        // Dirty the element's own module — now it hits.
+        let app = nested.appendingPathComponent("App/Sources/ProfileView.swift")
+        try Data((try String(contentsOf: app, encoding: .utf8) + "\n// tweak in module\n").utf8).write(to: app)
+        let own = try nestedEngine.affectedTests(ref: nil, files: nil)
+        XCTAssertEqual(
+            Set(own.affectedElements.map { $0.identifier }),
+            ["profile.save", "profile.notifications"]
+        )
+    }
 }

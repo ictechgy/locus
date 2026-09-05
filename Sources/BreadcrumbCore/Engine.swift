@@ -84,18 +84,25 @@ public struct Engine {
     /// - `ref`: compare working tree against a git ref.
     /// - `files`: explicit override (comma-separated from the CLI).
     public func affectedTests(ref: String?, files: [String]?) throws -> AffectedTestsResult {
-        let changed: [String]
+        var changed: [String]
+        var repoRoot: String?
         if let files, !files.isEmpty {
             changed = files
         } else {
             // Our own map artifacts are not source; never report them.
-            changed = try GitDiff.changedFiles(workingDirectory: workingDirectory, ref: ref)
-                .files
-                .filter { !$0.hasPrefix(".breadcrumb/") }
+            let diff = try GitDiff.changedFiles(workingDirectory: workingDirectory, ref: ref)
+            repoRoot = diff.repositoryRoot
+            changed = diff.files.filter { !$0.hasPrefix(".breadcrumb/") }
         }
+        // Changed files are repo-root-relative, element files are sourceRoot-relative.
+        // Align the frames of reference before matching.
+        let prefix = Self.repoRelativePrefix(
+            sourceRoot: map.sourceRoot, repoRoot: repoRoot, workingDirectory: workingDirectory
+        )
         var affected: [ElementRecord] = []
         for element in map.elements {
-            if changed.contains(where: { GitDiff.touches(elementFile: element.file, changedFile: $0) }) {
+            let repoPath = prefix.map { $0 + "/" + element.file } ?? element.file
+            if changed.contains(where: { GitDiff.touches(elementFile: repoPath, changedFile: $0) }) {
                 affected.append(element)
             }
         }
@@ -111,6 +118,26 @@ public struct Engine {
         }
         tests.sort { ($0.file, $0.line, $0.identifier) < ($1.file, $1.line, $1.identifier) }
         return AffectedTestsResult(changedFiles: changed, affectedElements: affected, tests: tests)
+    }
+
+    /// element.file paths are relative to the crawled sourceRoot; git reports
+    /// changes relative to the repository root. When the sourceRoot sits inside
+    /// the repository, return its repo-relative prefix (`App` for a repo with
+    /// `App/Sources/…`) so paths compare exactly. Suffix matching alone would
+    /// let `OtherModule/Sources/X.swift` changes false-positive on
+    /// `App/Sources/X.swift` elements. Returns nil when sourceRoot is not
+    /// inside the repository (suffix matching then remains the fallback).
+    static func repoRelativePrefix(sourceRoot: String, repoRoot: String?, workingDirectory: URL) -> String? {
+        guard let repoRoot, !repoRoot.isEmpty else { return nil }
+        var rootURL = URL(fileURLWithPath: sourceRoot, isDirectory: true)
+        if !sourceRoot.hasPrefix("/") {
+            rootURL = workingDirectory.appendingPathComponent(sourceRoot, isDirectory: true)
+        }
+        let resolvedSourceRoot = rootURL.resolvingSymlinksInPath().standardizedFileURL.path
+        let resolvedRepoRoot = URL(fileURLWithPath: repoRoot, isDirectory: true)
+            .resolvingSymlinksInPath().standardizedFileURL.path
+        guard resolvedSourceRoot.hasPrefix(resolvedRepoRoot + "/") else { return nil }
+        return String(resolvedSourceRoot.dropFirst(resolvedRepoRoot.count + 1))
     }
 
     private func order(_ lhs: ElementRecord, _ rhs: ElementRecord) -> Bool {
