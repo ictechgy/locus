@@ -99,17 +99,32 @@ public struct Engine {
         let prefix = Self.repoRelativePrefix(
             sourceRoot: map.sourceRoot, repoRoot: repoRoot, workingDirectory: workingDirectory
         )
+        // With aligned frames (prefix != nil, possibly ""), match exactly:
+        // suffix matching here would let a sibling directory's same-named
+        // file hit this module's elements (invariant 3). The suffix fallback
+        // exists only for a sourceRoot outside the repository.
+        let changedSet = Set(changed)
         var affected: [ElementRecord] = []
         for element in map.elements {
-            let repoPath = prefix.map { $0 + "/" + element.file } ?? element.file
-            if changed.contains(where: { GitDiff.touches(elementFile: repoPath, changedFile: $0) }) {
-                affected.append(element)
+            let repoPath: String
+            if let prefix {
+                repoPath = prefix.isEmpty ? element.file : prefix + "/" + element.file
+            } else {
+                repoPath = element.file
             }
+            let touched = prefix != nil
+                ? changedSet.contains(repoPath)
+                : changed.contains { GitDiff.touches(elementFile: repoPath, changedFile: $0) }
+            if touched { affected.append(element) }
         }
+        let testsByIdentifier = Dictionary(
+            map.tests.map { ($0.identifier, $0.tests) },
+            uniquingKeysWith: { first, _ in first }
+        )
         var seen = Set<String>()
         var tests: [AffectedTest] = []
         for element in affected.sorted(by: order) {
-            guard let references = map.tests.first(where: { $0.identifier == element.identifier })?.tests else { continue }
+            guard let references = testsByIdentifier[element.identifier] else { continue }
             for reference in references {
                 let key = "\(reference.file):\(reference.line):\(element.identifier)"
                 guard seen.insert(key).inserted else { continue }
@@ -125,8 +140,10 @@ public struct Engine {
     /// the repository, return its repo-relative prefix (`App` for a repo with
     /// `App/Sources/…`) so paths compare exactly. Suffix matching alone would
     /// let `OtherModule/Sources/X.swift` changes false-positive on
-    /// `App/Sources/X.swift` elements. Returns nil when sourceRoot is not
-    /// inside the repository (suffix matching then remains the fallback).
+    /// `App/Sources/X.swift` elements. Returns `""` when the sourceRoot *is*
+    /// the repository root (frames already aligned, element paths are
+    /// repo-relative as-is), and nil when sourceRoot is not inside the
+    /// repository (suffix matching then remains the fallback).
     static func repoRelativePrefix(sourceRoot: String, repoRoot: String?, workingDirectory: URL) -> String? {
         guard let repoRoot, !repoRoot.isEmpty else { return nil }
         var rootURL = URL(fileURLWithPath: sourceRoot, isDirectory: true)
@@ -136,6 +153,7 @@ public struct Engine {
         let resolvedSourceRoot = rootURL.resolvingSymlinksInPath().standardizedFileURL.path
         let resolvedRepoRoot = URL(fileURLWithPath: repoRoot, isDirectory: true)
             .resolvingSymlinksInPath().standardizedFileURL.path
+        if resolvedSourceRoot == resolvedRepoRoot { return "" }
         guard resolvedSourceRoot.hasPrefix(resolvedRepoRoot + "/") else { return nil }
         return String(resolvedSourceRoot.dropFirst(resolvedRepoRoot.count + 1))
     }
@@ -192,7 +210,7 @@ extension Encodable {
     /// Deterministic JSON: sorted keys, pretty printed, POSIX slashes.
     public func locusJSON() -> String {
         let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        encoder.outputFormatting = MapFormat.jsonFormatting
         guard let data = try? encoder.encode(self) else { return "{}" }
         return String(decoding: data, as: UTF8.self)
     }

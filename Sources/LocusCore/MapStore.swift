@@ -46,7 +46,7 @@ public enum MapStore {
 
     static func encode<T: Encodable>(_ value: T) -> Data {
         let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        encoder.outputFormatting = MapFormat.jsonFormatting
         return (try? encoder.encode(value)) ?? Data("{}".utf8)
     }
 

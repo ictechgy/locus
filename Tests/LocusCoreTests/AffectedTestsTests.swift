@@ -116,6 +116,45 @@ final class AffectedTestsTests: XCTestCase {
         XCTAssertEqual(result.tests.count, 2)
     }
 
+    func testRepoRootSourceRootAvoidsCrossModuleFalsePositives() throws {
+        // Crawling from the repository root itself (the `locus crawl .` case):
+        // element files are already repo-relative, so matching must be exact.
+        // The suffix fallback would let Other/Sources/ProfileView.swift hit
+        // elements anchored in Sources/ProfileView.swift.
+        let repoRoot = Fixture.makeTree("repo-root", files: [
+            "Sources/ProfileView.swift": screenFixture,
+            "Other/Sources/ProfileView.swift": screenFixture,
+            "Tests/ProfileUITests.swift": testFixture,
+        ])
+        defer { Fixture.cleanup(repoRoot) }
+        Fixture.git(["-c", "init.defaultBranch=main", "init"], in: repoRoot)
+        Fixture.git(["add", "."], in: repoRoot)
+        Fixture.gitIdentity(["commit", "-m", "init"], in: repoRoot)
+
+        let map = try Fixture.crawl(root: repoRoot)
+        let rootEngine = Engine(map: map, workingDirectory: repoRoot)
+        XCTAssertEqual(
+            Engine.repoRelativePrefix(sourceRoot: map.sourceRoot, repoRoot: repoRoot.path, workingDirectory: repoRoot),
+            ""
+        )
+
+        // Dirty a sibling directory's same-named file.
+        let other = repoRoot.appendingPathComponent("Other/Sources/ProfileView.swift")
+        try Data((try String(contentsOf: other, encoding: .utf8) + "\n// tweak elsewhere\n").utf8).write(to: other)
+        let elsewhere = try rootEngine.affectedTests(ref: nil, files: nil)
+        XCTAssertEqual(elsewhere.changedFiles, ["Other/Sources/ProfileView.swift"])
+        XCTAssertTrue(elsewhere.affectedElements.isEmpty, "sibling-directory change must not hit repo-root elements")
+
+        // Dirty the element's own file — now it hits.
+        let own = repoRoot.appendingPathComponent("Sources/ProfileView.swift")
+        try Data((try String(contentsOf: own, encoding: .utf8) + "\n// tweak own\n").utf8).write(to: own)
+        let hit = try rootEngine.affectedTests(ref: nil, files: nil)
+        XCTAssertEqual(
+            Set(hit.affectedElements.map { $0.identifier }),
+            ["profile.save", "profile.notifications"]
+        )
+    }
+
     func testNestedSourceRootAvoidsCrossModuleFalsePositives() throws {
         // sourceRoot nested inside the repo, with a sibling module that shares
         // file names. Suffix-only matching would report the other module's

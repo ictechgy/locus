@@ -65,10 +65,17 @@ public enum SnapshotDump {
 /// Read-only `idb ui describe-all` integration (prototype dump source).
 /// idb is optional: when absent the error says so, and file/stdin dumps keep
 /// working — locus itself never depends on any external tool beyond git.
+/// Unlike git there is no stable /usr/bin path for idb, so PATH lookup via
+/// `/usr/bin/env` is the only portable route.
 public enum SnapshotCapture {
     public static func idbDescribeAll(udid: String) throws -> String {
         guard !udid.isEmpty else {
             throw LocusError("--udid must not be empty.")
+        }
+        // Same rule as git refs in GitDiff: a value is data, never a tool
+        // option — a leading "-" could turn into an idb flag.
+        guard !udid.hasPrefix("-") else {
+            throw LocusError("invalid udid '\(udid)': must not start with '-'.")
         }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
@@ -140,15 +147,26 @@ public struct SnapshotMatcher {
     }
 
     public func match(nodes: [SnapshotNode], elements: [ElementRecord]) -> Report {
+        // Index the ledger once: per-identifier and per-label buckets, filled
+        // in (file, line, column) order so each bucket comes out sorted the
+        // way the per-node filters used to sort. Matching drops from
+        // O(nodes × elements) to O(nodes + elements) with identical output.
+        var identifierBuckets: [String: [ElementRecord]] = [:]
+        var labelBuckets: [String: [ElementRecord]] = [:]
+        for element in elements.sorted(by: { ($0.file, $0.line, $0.column) < ($1.file, $1.line, $1.column) }) {
+            identifierBuckets[element.identifier, default: []].append(element)
+            if let label = element.label, !label.isEmpty {
+                labelBuckets[label, default: []].append(element)
+            }
+        }
+
         var matches: [Match] = []
         var unidentified: [SnapshotNode] = []
         var unmatched: [String] = []
 
         for node in nodes {
             if let identifier = node.identifier {
-                let candidates = elements
-                    .filter { $0.identifier == identifier }
-                    .sorted { ($0.file, $0.line, $0.column) < ($1.file, $1.line, $1.column) }
+                let candidates = identifierBuckets[identifier] ?? []
                 matches.append(Match(
                     identifier: identifier,
                     label: node.label,
@@ -163,9 +181,7 @@ public struct SnapshotMatcher {
             // No identifier: label heuristic against identified elements.
             let labelCandidates: [ElementRecord]
             if let label = node.label, !label.isEmpty {
-                labelCandidates = elements
-                    .filter { $0.label == label }
-                    .sorted { ($0.file, $0.line, $0.column) < ($1.file, $1.line, $1.column) }
+                labelCandidates = labelBuckets[label] ?? []
             } else {
                 labelCandidates = []
             }
