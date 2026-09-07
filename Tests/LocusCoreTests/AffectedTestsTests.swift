@@ -119,11 +119,21 @@ final class AffectedTestsTests: XCTestCase {
     func testRepoRootSourceRootAvoidsCrossModuleFalsePositives() throws {
         // Crawling from the repository root itself (the `locus crawl .` case):
         // element files are already repo-relative, so matching must be exact.
-        // The suffix fallback would let Other/Sources/ProfileView.swift hit
-        // elements anchored in Sources/ProfileView.swift.
+        // The suffix fallback would let a change to Other/Sources/ProfileView.swift
+        // also hit the elements anchored in Sources/ProfileView.swift.
+        let otherScreenFixture = """
+        import SwiftUI
+
+        struct OtherProfileView: View {
+            var body: some View {
+                Button("Pay") {}
+                    .accessibilityIdentifier("other.pay")
+            }
+        }
+        """
         let repoRoot = Fixture.makeTree("repo-root", files: [
             "Sources/ProfileView.swift": screenFixture,
-            "Other/Sources/ProfileView.swift": screenFixture,
+            "Other/Sources/ProfileView.swift": otherScreenFixture,
             "Tests/ProfileUITests.swift": testFixture,
         ])
         defer { Fixture.cleanup(repoRoot) }
@@ -138,20 +148,26 @@ final class AffectedTestsTests: XCTestCase {
             ""
         )
 
-        // Dirty a sibling directory's same-named file.
+        // Dirty a sibling directory's same-named file: it must affect only
+        // its own module's element, never the Sources/ one.
         let other = repoRoot.appendingPathComponent("Other/Sources/ProfileView.swift")
         try Data((try String(contentsOf: other, encoding: .utf8) + "\n// tweak elsewhere\n").utf8).write(to: other)
         let elsewhere = try rootEngine.affectedTests(ref: nil, files: nil)
         XCTAssertEqual(elsewhere.changedFiles, ["Other/Sources/ProfileView.swift"])
-        XCTAssertTrue(elsewhere.affectedElements.isEmpty, "sibling-directory change must not hit repo-root elements")
+        XCTAssertEqual(
+            Set(elsewhere.affectedElements.map { $0.identifier }),
+            ["other.pay"],
+            "sibling-directory change must not hit Sources/ elements"
+        )
 
-        // Dirty the element's own file — now it hits.
+        // Dirty the element's own file — now those hit too. Both files are
+        // dirty at this point, so all three elements are affected.
         let own = repoRoot.appendingPathComponent("Sources/ProfileView.swift")
         try Data((try String(contentsOf: own, encoding: .utf8) + "\n// tweak own\n").utf8).write(to: own)
         let hit = try rootEngine.affectedTests(ref: nil, files: nil)
         XCTAssertEqual(
             Set(hit.affectedElements.map { $0.identifier }),
-            ["profile.save", "profile.notifications"]
+            ["profile.save", "profile.notifications", "other.pay"]
         )
     }
 
