@@ -133,16 +133,26 @@ private final class LiteralVisitor: SyntaxVisitor {
         let rootName = SyntaxText.normalizedName(node.baseName.text)
         guard constants.rootTypeNames.contains(rootName) else { return .visitChildren }
         var components = [rootName]
+        var top: Syntax = Syntax(node)
         var current = node.parent
         while let member = current?.as(MemberAccessExprSyntax.self) {
             components.append(SyntaxText.normalizedName(member.declName.baseName.text))
+            top = Syntax(member)
             current = member.parent
         }
         guard let value = constants.resolve(chain: components) else { return .visitChildren }
         let position = lineIndex.lineColumn(
             utf8Offset: node.positionAfterSkippingLeadingTrivia.utf8Offset
         )
-        found.append(Found(value: value, line: position.line, column: position.column, isQueryContext: true))
+        found.append(Found(
+            value: value,
+            line: position.line,
+            column: position.column,
+            // Orphan gating uses the same query-position rule as string
+            // literals: a constant referenced outside a UI query is a usage,
+            // not an automation-debt candidate.
+            isQueryContext: Self.isQueryPosition(top)
+        ))
         return .visitChildren
     }
 

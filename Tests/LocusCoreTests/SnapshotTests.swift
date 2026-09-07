@@ -119,6 +119,17 @@ final class SnapshotTests: XCTestCase {
         XCTAssertEqual(a, b)
     }
 
+    func testUDIDGuardsRejectInvalidValues() {
+        // Both guards fire before any process is spawned, so they hold even
+        // on machines without idb installed.
+        XCTAssertThrowsError(try SnapshotCapture.idbDescribeAll(udid: "")) { error in
+            XCTAssertTrue("\(error)".contains("must not be empty"), "got: \(error)")
+        }
+        XCTAssertThrowsError(try SnapshotCapture.idbDescribeAll(udid: "--flag")) { error in
+            XCTAssertTrue("\(error)".contains("must not start with '-'"), "got: \(error)")
+        }
+    }
+
     func testMCPMatchSnapshotTool() throws {
         let engine = try makeEngine()
         let mcp = MCPEngine(engine: engine)

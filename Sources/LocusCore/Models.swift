@@ -140,6 +140,12 @@ public enum MapFormat {
     public static let tool = "locus \(releaseVersion)"
     /// Default map directory, relative to the current working directory.
     public static let defaultDirectoryName = ".locus"
+    /// Output formatting shared by every locus JSON surface (map files, CLI,
+    /// MCP tool payloads) so the deterministic-bytes invariant cannot drift
+    /// between writers.
+    public static let jsonFormatting: JSONEncoder.OutputFormatting = [
+        .prettyPrinted, .sortedKeys, .withoutEscapingSlashes,
+    ]
 }
 
 /// An error surfaced to CLI/MCP consumers as a human-readable message.

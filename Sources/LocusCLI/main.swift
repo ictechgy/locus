@@ -12,6 +12,7 @@ USAGE:
     locus what-renders <symbol|file> [--out DIR]
     locus affected-tests [--ref <git-ref>] [--files f1,f2] [--out DIR]
     locus missing-identifiers [--out DIR]
+    locus snapshot <dump.json|-> [--udid UDID] [--out DIR]
     locus mcp [--out DIR]
     locus --help | --version
 

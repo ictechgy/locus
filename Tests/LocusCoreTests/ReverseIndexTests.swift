@@ -61,6 +61,54 @@ final class ReverseIndexTests: XCTestCase {
         XCTAssertEqual(map.orphans.first?.file, "Tests/SettingsUITests.swift")
     }
 
+    func testConstantRefOrphansOnlyInQueryPosition() throws {
+        // A constant that resolves to an unknown identifier is orphan debt
+        // only where it is *used as* an identifier (subscript / matching
+        // call). A plain `let label = A11y.ghost` binding is not a query.
+        let sourceFixture = """
+        import SwiftUI
+
+        struct Screen: View {
+            var body: some View {
+                Button("Save") {}
+                    .accessibilityIdentifier(A11y.known)
+            }
+        }
+
+        enum A11y {
+            static let known = "screen.save"
+            static let ghost = "screen.ghost.button"
+        }
+        """
+        let testFixture = """
+        import XCTest
+
+        final class ScreenUITests: XCTestCase {
+            func testMix() {
+                let label = A11y.ghost
+                _ = label
+                app.buttons[A11y.ghost].tap()
+                app.buttons[A11y.known].tap()
+            }
+        }
+        """
+        let root = Fixture.makeTree("const-query", files: [
+            "Sources/Screen.swift": sourceFixture,
+            "Tests/ScreenUITests.swift": testFixture,
+        ])
+        defer { Fixture.cleanup(root) }
+        let map = try Fixture.crawl(root: root)
+
+        // A11y.known resolves to a real identifier and is used as a query.
+        XCTAssertEqual(map.tests.map(\.identifier), ["screen.save"])
+
+        // The ghost constant appears twice, but only the UI-query position
+        // is orphan debt.
+        XCTAssertEqual(map.orphans.count, 1, "orphans: \(map.orphans)")
+        XCTAssertEqual(map.orphans.first?.literal, "screen.ghost.button")
+        XCTAssertEqual(map.orphans.first?.line, Fixture.line(of: "app.buttons[A11y.ghost]", in: testFixture))
+    }
+
     func testNonTestFilesAreNotScanned() throws {
         // A dotted string in app code must not become an orphan or a test ref;
         // only test-glob paths feed the reverse index.
