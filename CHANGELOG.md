@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- `affected-tests`: crawling from the repository root itself (the common
+  `locus crawl .` case) fell back to suffix path matching, so a change to a
+  same-named file in a sibling directory was reported as affecting the
+  crawled module's elements. Aligned frames (sourceRoot inside or equal to
+  the repo root) now match exactly; suffix matching remains only when the
+  sourceRoot lies outside the repository.
+- Orphan gating for constant references (`app.buttons[A11y.x]`) now applies
+  the same query-position rule as string literals — a constant bound with
+  `let label = A11y.x` outside any UI query is no longer reported as orphan
+  debt.
+- `snapshot --udid`: values starting with `-` are rejected (same
+  option-injection guard as git refs); `--help` USAGE now lists the
+  `snapshot` command.
+
+### Changed
+
+- `match_snapshot` and `affected_tests` build identifier/label indexes once
+  per query instead of linear scans per node/element
+  (O(nodes × elements) → O(nodes + elements)); output is byte-identical.
+
 ## 0.3.0 — 2026-09-05
 
 Dynamic snapshot matching: "the element on screen right now" → source.

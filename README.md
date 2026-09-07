@@ -195,6 +195,9 @@ Cursor (`~/.cursor/mcp.json`): 동일한 형식.
   가지면 해석을 생략한다.
 - **정적 분석의 누락이 있다** — 라벨-식별자 결합은 같은 문장/체인 안에서만
   이루어진다. 누락은 잔차로 드러난다.
+- **UIKit missing 판정은 같은 파일 안에서만 연결된다** — 아웃릿 프로퍼티 선언과
+  `accessibilityIdentifier` 대입이 다른 파일(extension 등)에 나뉘어 있으면
+  missing-identifiers에 과다 보고될 수 있다.
 - **칼럼은 UTF-8 바이트 기준**, 다바이트 문자가 앞에 오면 편집기 칼럼과 어긋날
   수 있다.
 - **`affected-tests` 미추적 파일 제외** — untracked 파일은 git diff에 안
