@@ -14,8 +14,22 @@ jobs:
       # package builds on any Swift 5.9+ toolchain (swift-syntax 600.x in
       # Swift 5 language mode).
       - name: Build (debug)
-        run: swift build
+        run: |
+          set -o pipefail
+          swift build 2>&1 | tee build-debug.log || {
+            grep -E "error:" build-debug.log | head -10 | while IFS= read -r line; do
+              echo "::error::${line}"
+            done
+            exit 1
+          }
       - name: Test
-        run: swift test
+        run: |
+          set -o pipefail
+          swift test 2>&1 | tee test.log || {
+            grep -E "error:|XCTAssertEqual failed|failed -" test.log | head -10 | while IFS= read -r line; do
+              echo "::error::${line}"
+            done
+            exit 1
+          }
       - name: Build (release)
         run: swift build -c release
