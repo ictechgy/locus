@@ -10,10 +10,34 @@
   crawled module's elements. Aligned frames (sourceRoot inside or equal to
   the repo root) now match exactly; suffix matching remains only when the
   sourceRoot lies outside the repository.
+- `affected-tests` resolves the repository from the map's `sourceRoot`:
+  calling with an absolute `--out` from outside the repository used to
+  fail git ("Not a git repository"). Explicit `--files` are normalized in
+  the same repo frame (a sibling module's same-named file no longer
+  false-positives), and an explicitly empty file list no longer falls
+  back to git.
+- Partial or torn maps now fail loudly on load: missing data files, format
+  version mismatches, and index/array count mismatches all error with a
+  re-crawl hint. A map missing `tests.json` used to load as empty arrays
+  and answer `affected-tests` with 0 tests, exit 0.
+- `MapStore` atomic writes propagate replacement failures — a directory
+  occupying a map file's path used to report a successful crawl whose map
+  was never written.
 - Orphan gating for constant references (`app.buttons[A11y.x]`) now applies
   the same query-position rule as string literals — a constant bound with
   `let label = A11y.x` outside any UI query is no longer reported as orphan
   debt.
+- Mutable constants are no longer recorded as identifiers: only `let`
+  bindings enter the constant table (`static var` reassignments would go
+  stale with full confidence).
+- Empty-string identifiers (`.accessibilityIdentifier("")`) and unresolved
+  UIKit assignments now surface as automation debt instead of silently
+  marking the control identified.
+- CLI options are validated against a per-command grammar: a value-less
+  `--out` (previously the literal string "true" — maps written into
+  `./true/`), an empty `--name=`, unknown options, and wrong positional
+  counts are usage errors. The parser moved from `main.swift` into
+  `LocusCore/Arguments.swift`.
 - `snapshot --udid`: values starting with `-` are rejected (same
   option-injection guard as git refs); `--help` USAGE now lists the
   `snapshot` command.
@@ -23,6 +47,15 @@
 - `match_snapshot` and `affected_tests` build identifier/label indexes once
   per query instead of linear scans per node/element
   (O(nodes × elements) → O(nodes + elements)); output is byte-identical.
+- `crawl` skips symlinks during traversal: a directory link could abort
+  the whole crawl (Cocoa 256 / POSIX 20 on ancestor loops) or duplicate
+  files; the crawl root itself may still be a symlink.
+- MCP stdio frames are capped at 32 MiB (oversized input gets a JSON-RPC
+  error and the connection keeps serving), and frame splitting removes
+  consumed bytes once per chunk instead of once per line.
+- git/idb subprocesses run with hard timeouts (60 s / 120 s, SIGTERM on
+  expiry) through a shared `ProcessRunner` — a wedged child can no longer
+  hang a CLI query or the MCP loop.
 
 ## 0.3.0 — 2026-09-05
 

@@ -120,7 +120,7 @@ locus mcp [--out DIR]
 | `crawl` | `sourceRoot` 아래 모든 `*.swift`를 SwiftSyntax로 파싱해 식별자·라벨을 추출하고, 테스트 경로(`--tests-glob`, 기본 `*Tests*`)의 문자열 리터럴과 상수 참조를 역색인한다. `.locus/` 아래 `elements.json`, `tests.json`, `orphans.json`, `missing-identifiers.json`, `index.json`을 기록한다. 같은 입력이면 항상 같은 바이트(결정적), 임시 파일 + rename 원자적 덮어쓰기. |
 | `where-is` | 식별자를 가진 모든 요소(파일:줄:칼럼, 심볼 앵커, 종류, 라벨)와 그 식별자를 참조하는 테스트 목록. |
 | `what-renders` | 타겟을 심볼(`ProfileView`, `ProfileView.avatarToggle`) 또는 파일 경로로 해석해 그 안에 앵커된 요소들을 반환. |
-| `affected-tests` | 변경 파일(기본: 워킹 트리 `git diff HEAD`, `--ref` 지정 시 `git diff <ref>`) → 그 파일에 앵커된 요소 → 중복 제거된 테스트 목록. `--files`로 git 없이 직접 지정도 가능. |
+| `affected-tests` | 변경 파일(기본: 워킹 트리 `git diff HEAD`, `--ref` 지정 시 `git diff <ref>`) → 그 파일에 앵커된 요소 → 중복 제거된 테스트 목록. git은 **맵의 sourceRoot가 속한 저장소**에서 실행된다(러처 디렉터리가 아닌 곳에서 `--out`으로 호출해도 동작). `--files`로 git 없이 직접 지정도 가능 — 경로는 같은 저장소 기준으로 해석되고, 빈 목록은 git을 실행하지 않는다. |
 | `missing-identifiers` | 식별자 없는 **인터랙티브** 컨트롤(버튼·토글·입력필드 등 — 탭/타이핑 대상)을 파일별로 나열. 정적 텍스트·이미지는 라벨로 매칭 가능하므로 제외. |
 | `snapshot` | 런타임 접근성 트리 덤프(JSON)를 정적 맵과 매칭. identifier 직매칭(`high`), 고유 라벨 휴리스틱(`medium`, kind 불일치 시 `low`). 잔차 리포트: 화면상 식별자 없는 요소(자동화 부채), 맵에 없는 식별자(동적 식별자·스테일 맵 단서), 화면에 안 보이는 맵 식별자, 커버리지 점수. `--udid` 시 `idb ui describe-all`로 덤프를 직접 캡처(prototype, idb는 선택 의존). |
 | `mcp` | stdio 위 JSON-RPC 2.0 MCP 서버. `initialize` / `tools/list` / `tools/call` 지원, EOF에서 정상 종료. |
@@ -188,8 +188,9 @@ Cursor (`~/.cursor/mcp.json`): 동일한 형식.
   (element-x-ios의 `session_verification-*` 사례)는 정적 원장에 없다.
   테스트가 이를 참조하면 `orphans`로, 화면에 나타나면 `snapshot`의
   `unmatchedIdentifiers`로 드러난다 — 버그가 아니라 자동화 부채의 계량.
-- **상수 해석의 경계** — `enum`/`struct` 멤버의 문자열 리터럴과 String raw-value
-  enum 케이스, `static let ns = Type()` 네임스페이스 별칭을 해석한다.
+- **상수 해석의 경계** — `enum`/`struct` 멤버의 **불변(`let`)** 문자열 리터럴과
+  String raw-value enum 케이스, `static let ns = Type()` 네임스페이스 별칭을
+  해석한다. `var`는 런타임 재할당 가능성 때문에 제외한다(미해석 잔차로 남는다).
   같은 (타입, 멤버) 이름의 충돌 선언은 그 항목을 버린다(모호하면 미해석).
   타입 이름은 중첩 경로 없이 키로 쓰므로, 서로 다른 타입이 같은 이름+멤버를
   가지면 해석을 생략한다.
@@ -198,6 +199,9 @@ Cursor (`~/.cursor/mcp.json`): 동일한 형식.
 - **UIKit missing 판정은 같은 파일 안에서만 연결된다** — 아웃릿 프로퍼티 선언과
   `accessibilityIdentifier` 대입이 다른 파일(extension 등)에 나뉘어 있으면
   missing-identifiers에 과다 보고될 수 있다.
+- **크롤은 심볼릭 링크를 건너뛴다** — 디렉터리 링크 순회는 트리 이탈·조상 루프를
+  만들 수 있고 파일 링크는 같은 소스를 두 경로로 이중 수집한다. 크롤 루트 자체는
+  링크여도 좋다(해석 후 순회).
 - **칼럼은 UTF-8 바이트 기준**, 다바이트 문자가 앞에 오면 편집기 칼럼과 어긋날
   수 있다.
 - **`affected-tests` 미추적 파일 제외** — untracked 파일은 git diff에 안
@@ -254,7 +258,7 @@ v1.x  화면 경계 유추, IndexStoreDB 심볼 앵커, identifier 코드젠,
 ## 개발
 
 ```bash
-make test        # swift test — 50 tests
+make test        # swift test — 전체 XCTest 스위트
 make release     # 첫 릴리스 빌드는 swift-syntax 컴파일로 수 분 걸린다
 ```
 
