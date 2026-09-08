@@ -124,6 +124,83 @@ final class CrawlerTests: XCTestCase {
         XCTAssertEqual(map.missingIdentifiers.count, 2)
     }
 
+    func testEmptyIdentifierCountsAsDebt() throws {
+        // `.accessibilityIdentifier("")` used to count as "identified" for
+        // debt purposes while producing no element — the control vanished
+        // from both lists.
+        let fixture = """
+        import SwiftUI
+
+        struct GhostView: View {
+            var body: some View {
+                Button("Ghost") {}
+                    .accessibilityIdentifier("")
+            }
+        }
+        """
+        let root = Fixture.makeTree("empty-id", files: ["Sources/GhostView.swift": fixture])
+        defer { Fixture.cleanup(root) }
+        let map = try Fixture.crawl(root: root)
+
+        XCTAssertFalse(map.elements.contains { $0.identifier.isEmpty })
+        XCTAssertEqual(map.missingIdentifiers.count, 1, "empty identifier is debt: \(map.missingIdentifiers)")
+        XCTAssertEqual(map.missingIdentifiers.first?.kind, "Button")
+        XCTAssertEqual(map.missingIdentifiers.first?.reason, "swiftui-call")
+    }
+
+    func testUnresolvedUIKitAssignmentCountsAsDebt() throws {
+        // UIKit assignments used to mark the outlet "assigned" before the
+        // constant resolved — an unresolved chain hid the real debt.
+        let fixture = """
+        import UIKit
+
+        final class PayViewController: UIViewController {
+            @IBOutlet var payButton: UIButton!
+            @IBOutlet var okButton: UIButton!
+
+            override func viewDidLoad() {
+                super.viewDidLoad()
+                payButton.accessibilityIdentifier = MissingIDs.pay
+                okButton.accessibilityIdentifier = "pay.ok"
+            }
+        }
+        """
+        let root = Fixture.makeTree("uikit-unresolved", files: ["Sources/PayViewController.swift": fixture])
+        defer { Fixture.cleanup(root) }
+        let map = try Fixture.crawl(root: root)
+
+        XCTAssertEqual(map.elements.map(\.identifier), ["pay.ok"])
+        XCTAssertTrue(
+            map.missingIdentifiers.contains { $0.symbol.hasSuffix("payButton") },
+            "unresolved assignment must not mark the outlet assigned: \(map.missingIdentifiers)"
+        )
+        XCTAssertFalse(map.missingIdentifiers.contains { $0.symbol.hasSuffix("okButton") })
+    }
+
+    func testSymlinksAreSkippedAndLoopsAreSafe() throws {
+        // A directory symlink used to be followed (duplicating files or
+        // aborting the whole crawl on an ancestor loop — Cocoa 256).
+        let root = Fixture.makeTree("symlinks", files: ["Sources/Screen.swift": swiftUIFixture])
+        defer { Fixture.cleanup(root) }
+        let fm = FileManager.default
+        try fm.createSymbolicLink(
+            atPath: root.appendingPathComponent("Linked").path,
+            withDestinationPath: root.appendingPathComponent("Sources").path
+        )
+        try fm.createSymbolicLink(
+            atPath: root.appendingPathComponent("Loop").path,
+            withDestinationPath: root.path
+        )
+        try fm.createSymbolicLink(
+            atPath: root.appendingPathComponent("AliasScreen.swift").path,
+            withDestinationPath: root.appendingPathComponent("Sources/Screen.swift").path
+        )
+        let map = try Fixture.crawl(root: root)
+
+        XCTAssertEqual(map.elements.count, 3, "no duplicates through links: \(map.elements.map(\.identifier))")
+        XCTAssertTrue(map.elements.allSatisfy { $0.file == "Sources/Screen.swift" })
+    }
+
     func testDeterministicOutput() throws {
         let files = ["Sources/SettingsScreen.swift": swiftUIFixture, "Sources/LoginViewController.swift": uiKitFixture]
         let rootA = Fixture.makeTree("det-a", files: files)

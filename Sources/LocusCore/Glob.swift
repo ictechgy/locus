@@ -82,11 +82,18 @@ public enum SourceTree {
         let alwaysSkip = [".git", ".build", ".swiftpm", "DerivedData", "Pods", ".locus", "node_modules"]
 
         func walk(directory: URL, relativePrefix: String) throws {
-            let entries = try fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isDirectoryKey])
+            let entries = try fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey])
             for entry in entries.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
                 let name = entry.lastPathComponent
                 if alwaysSkip.contains(name) { continue }
                 if name.hasPrefix(".") { continue }
+                // Symlinks are skipped wholesale: a linked directory could
+                // point outside the tree or loop back to an ancestor (which
+                // used to abort the whole crawl with Cocoa 256 / POSIX 20),
+                // and a linked file would be crawled twice under two paths.
+                // The crawl root itself is resolved before walking, so it may
+                // still be a symlink.
+                if (try? entry.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink == true { continue }
                 let relative = relativePrefix.isEmpty ? name : relativePrefix + "/" + name
                 if Glob.matchesAny(path: relative, patterns: excludes) { continue }
                 var isDir: ObjCBool = false
