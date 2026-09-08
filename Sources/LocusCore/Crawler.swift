@@ -51,11 +51,16 @@ public struct RawHit {
     /// statement (SwiftUI), or the same outlet property inside the same member
     /// (UIKit).
     var groupKey: String
+    /// UIKit assignments only: the base property name being assigned
+    /// (`payButton` for `payButton.accessibilityIdentifier = …`). Assigned
+    /// status is decided after constant resolution, not at visit time.
+    var assignedRoot: String?
     var hasValue: Bool { value != nil }
 
     init(
         flavor: Flavor, value: String?, chain: [String]? = nil,
-        file: String, line: Int, column: Int, symbol: String, kindGuess: String, groupKey: String
+        file: String, line: Int, column: Int, symbol: String, kindGuess: String, groupKey: String,
+        assignedRoot: String? = nil
     ) {
         self.flavor = flavor
         self.value = value
@@ -66,6 +71,7 @@ public struct RawHit {
         self.symbol = symbol
         self.kindGuess = kindGuess
         self.groupKey = groupKey
+        self.assignedRoot = assignedRoot
     }
 }
 
@@ -101,17 +107,17 @@ public struct Crawler {
     /// Crawl one file. `relativePath` is the POSIX path relative to the source
     /// root and is what appears in output. Returns raw hits (constant chains
     /// unresolved — resolve them once the whole-repo `ConstantTable` is
-    /// complete), control call sites, UIKit outlet candidates, assigned outlet
-    /// names, and the file's constant declarations.
+    /// complete), control call sites, UIKit outlet candidates, and the file's
+    /// constant declarations.
     public func crawlFile(source: String, relativePath: String) throws
-        -> (hits: [RawHit], controlSites: [ControlCallSite], outletCandidates: [MissingIdentifier], assignedOutletNames: Set<String>, declarations: DeclarationCollector)
+        -> (hits: [RawHit], controlSites: [ControlCallSite], outletCandidates: [MissingIdentifier], declarations: DeclarationCollector)
     {
         let tree = Parser.parse(source: source)
         let visitor = AccessibilityVisitor(relativePath: relativePath, source: source)
         visitor.walk(tree)
         let declarations = DeclarationCollector()
         declarations.walk(tree)
-        return (visitor.hits, visitor.controlSites, visitor.outletCandidates, visitor.assignedOutletNames, declarations)
+        return (visitor.hits, visitor.controlSites, visitor.outletCandidates, declarations)
     }
 
     /// Crawl a whole source root.
@@ -129,16 +135,14 @@ public struct Crawler {
         var allHits: [RawHit] = []
         var allSites: [ControlCallSite] = []
         var outletCandidates: [MissingIdentifier] = []
-        var assignedNamesPerFile: [String: Set<String>] = [:]
         var constants = ConstantTable()
         for relative in files {
             let source = SourceTree.readSource(at: readRoot.appendingPathComponent(relative))
-            let (hits, sites, outlets, assigned, declarations) = try crawlFile(source: source, relativePath: relative)
+            let (hits, sites, outlets, declarations) = try crawlFile(source: source, relativePath: relative)
             constants.absorb(declarations)
             allHits.append(contentsOf: hits)
             allSites.append(contentsOf: sites)
             outletCandidates.append(contentsOf: outlets)
-            assignedNamesPerFile[relative] = assigned
         }
         // Constant chains resolve only now: the table spans the whole crawl.
         allHits = allHits.map { hit in
@@ -154,10 +158,11 @@ public struct Crawler {
             return $0.identifier < $1.identifier
         }
 
-        // Missing identifiers, SwiftUI side: control call sites whose statement
-        // group never received an identifier hit.
-        let identifierGroups = Set(allHits.filter { $0.flavor == .identifier && $0.hasValue }.map(\.groupKey))
-        let labeledGroups = Set(allHits.filter { $0.flavor == .label && $0.hasValue }.map(\.groupKey))
+        // A group counts as identified only when an identifier *resolved to a
+        // non-empty string*: `.accessibilityIdentifier("")` or an unresolved
+        // constant reference used to silence the automation-debt report.
+        let identifierGroups = Self.identifiedGroupKeys(allHits, flavor: .identifier)
+        let labeledGroups = Self.identifiedGroupKeys(allHits, flavor: .label)
         var missing: [MissingIdentifier] = allSites.compactMap { site in
             guard !identifierGroups.contains(site.groupKey) else { return nil }
             return MissingIdentifier(
@@ -165,6 +170,16 @@ public struct Crawler {
                 symbol: site.symbol, reason: "swiftui-call",
                 hasLabel: labeledGroups.contains(site.groupKey)
             )
+        }
+        // UIKit outlets count as assigned only when an assignment's value
+        // resolves to a non-empty identifier — decided here, after constant
+        // resolution, not at visit time.
+        var assignedNamesPerFile: [String: Set<String>] = [:]
+        for hit in allHits {
+            guard hit.flavor == .identifier,
+                  let root = hit.assignedRoot,
+                  let value = hit.value, !value.isEmpty else { continue }
+            assignedNamesPerFile[hit.file, default: []].insert(root)
         }
         // UIKit side: control-typed properties never assigned an identifier.
         missing.append(contentsOf: outletCandidates.filter { candidate in
@@ -181,6 +196,16 @@ public struct Crawler {
 
     // MARK: - Merging
 
+    /// Group keys that resolved to a non-empty value for the given flavor.
+    /// Empty strings and unresolved constants do not count as identified.
+    static func identifiedGroupKeys(_ hits: [RawHit], flavor: RawHit.Flavor) -> Set<String> {
+        Set(
+            hits
+                .filter { $0.flavor == flavor && !($0.value ?? "").isEmpty }
+                .map(\.groupKey)
+        )
+    }
+
     /// Merge identifier + label hits that share a group key into element records.
     static func merge(hits: [RawHit]) -> [ElementRecord] {
         var groups: [String: [RawHit]] = [:]
@@ -193,7 +218,7 @@ public struct Crawler {
             let labelHits = groupHits.filter { $0.flavor == .label }
             for idHit in identifierHits {
                 guard let identifier = idHit.value, !identifier.isEmpty else { continue }
-                let label = labelHits.first { $0.hasValue }?.value
+                let label = labelHits.first { !($0.value ?? "").isEmpty }?.value
                 let kind = (idHit.kindGuess == "Unknown")
                     ? (labelHits.first?.kindGuess ?? "Unknown")
                     : idHit.kindGuess
@@ -219,8 +244,6 @@ private final class AccessibilityVisitor: SyntaxVisitor {
     var hits: [RawHit] = []
     var controlSites: [ControlCallSite] = []
     var outletCandidates: [MissingIdentifier] = []
-    /// UIKit outlet property names that DID get an identifier assignment.
-    var assignedOutletNames: Set<String> = []
     /// Property name -> control type, from declarations in this file. Used to
     /// kind-guess assignments like `payButton.accessibilityIdentifier = ...`
     /// where the statement itself carries no type information.
@@ -299,10 +322,6 @@ private final class AccessibilityVisitor: SyntaxVisitor {
             let chain = literal == nil ? SyntaxText.memberChain(rhs) : nil
             let ctx = enclosingContext(of: node)
             let root = Self.basePropertyName(lhs.base)
-            let hasValue = literal != nil || chain != nil
-            if flavor == .identifier, hasValue, let root {
-                assignedOutletNames.insert(root)
-            }
             let suffix = root ?? "anon\(node.positionAfterSkippingLeadingTrivia.utf8Offset)"
             hits.append(RawHit(
                 flavor: flavor,
@@ -313,7 +332,8 @@ private final class AccessibilityVisitor: SyntaxVisitor {
                 column: lineIndex.lineColumn(utf8Offset: element.positionAfterSkippingLeadingTrivia.utf8Offset).column,
                 symbol: ctx.symbol,
                 kindGuess: uiKitKindGuess(ctx: ctx, statement: node, lhsRoot: root),
-                groupKey: "lhs:\(relativePath):\(ctx.symbol):\(suffix)"
+                groupKey: "lhs:\(relativePath):\(ctx.symbol):\(suffix)",
+                assignedRoot: flavor == .identifier ? root : nil
             ))
         }
         return .visitChildren

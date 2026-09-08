@@ -122,7 +122,11 @@ public final class DeclarationCollector: SyntaxVisitor {
 
     /// `let/vars` inside a nominal type: string-literal members become
     /// constants, `static let ns = Type()` constructor members become aliases.
+    /// Immutable bindings only — a `var` can be reassigned at runtime, and
+    /// recording its initializer would put a maybe-stale value in the ledger
+    /// with full confidence.
     override public func visit(_ node: VariableDeclSyntax) -> SyntaxVisitorContinueKind {
+        guard node.bindingSpecifier.text == "let" else { return .visitChildren }
         guard let typeName = nearestNominalAncestorTypeName(of: Syntax(node)) else {
             return .visitChildren
         }

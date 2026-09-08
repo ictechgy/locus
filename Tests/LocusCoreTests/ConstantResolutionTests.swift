@@ -168,6 +168,49 @@ final class ConstantResolutionTests: XCTestCase {
         XCTAssertEqual(map.orphans.first?.line, Fixture.line(of: "app.buttons[\"ghost.button\"]", in: testFixture))
     }
 
+    func testMutableVarsAreNotConstants() throws {
+        // Immutable bindings only: a `var` can be reassigned at runtime, and
+        // its initializer as a high-confidence identifier would go stale.
+        let fixture = """
+        import SwiftUI
+
+        enum ScreenIDs {
+            static var theme = "screen.theme"
+            static let stable = "screen.stable"
+            static var legacyScreen = Legacy()
+            struct Legacy { let pay = "legacy.pay" }
+        }
+
+        struct Holder {
+            var mutable = "holder.value"
+        }
+
+        struct S: View {
+            var body: some View {
+                Button("Theme") {}.accessibilityIdentifier(ScreenIDs.theme)
+                Button("Stable") {}.accessibilityIdentifier(ScreenIDs.stable)
+                Button("Legacy") {}.accessibilityIdentifier(ScreenIDs.legacyScreen.pay)
+                Button("Holder") {}.accessibilityIdentifier(Holder.mutable)
+            }
+        }
+        """
+        let root = Fixture.makeTree("mutable-const", files: ["Sources/S.swift": fixture])
+        defer { Fixture.cleanup(root) }
+        let map = try Fixture.crawl(root: root)
+
+        XCTAssertEqual(map.elements.map(\.identifier), ["screen.stable"],
+                       "only immutable bindings resolve: \(map.elements.map(\.identifier))")
+        XCTAssertEqual(map.missingIdentifiers.count, 3, "unresolved mutable refs surface as debt: \(map.missingIdentifiers)")
+        XCTAssertEqual(
+            Set(map.missingIdentifiers.map(\.line)),
+            [
+                Fixture.line(of: "Button(\"Theme\")", in: fixture),
+                Fixture.line(of: "Button(\"Legacy\")", in: fixture),
+                Fixture.line(of: "Button(\"Holder\")", in: fixture),
+            ]
+        )
+    }
+
     func testNonInteractiveKindsAreNotAutomationDebt() throws {
         let fixture = """
         import SwiftUI
