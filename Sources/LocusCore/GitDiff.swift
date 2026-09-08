@@ -3,6 +3,9 @@ import Foundation
 /// Git integration through `Process`. locus never mutates repository
 /// state; it only reads diffs and status.
 public enum GitDiff {
+    /// A wedged git must not hang a CLI query or the MCP loop.
+    public static let gitTimeout: TimeInterval = 60
+
     public struct Result {
         public var files: [String]
         public var repositoryRoot: String
@@ -48,45 +51,25 @@ public enum GitDiff {
     }
 
     /// Run a git command, capturing stdout/stderr. Both pipes are drained
-    /// concurrently — reading stdout to EOF while git fills the 64KB stderr
-    /// pipe would deadlock a sequential drain.
+    /// concurrently and the child is bounded by a timeout — see
+    /// `ProcessRunner`.
     ///
     /// Uses /usr/bin/git when present: MCP clients launched from GUI apps pass
     /// a minimal PATH where `env git` lookup can fail even though git exists.
     public static func run(arguments: [String], workingDirectory: URL) -> (exit: Int32, stdout: String, stderr: String) {
-        let process = Process()
+        let outcome: ProcessRunner.Outcome
         if FileManager.default.fileExists(atPath: "/usr/bin/git") {
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-            process.arguments = arguments
+            outcome = ProcessRunner.run(
+                executableURL: URL(fileURLWithPath: "/usr/bin/git"),
+                arguments: arguments, workingDirectory: workingDirectory, timeout: gitTimeout
+            )
         } else {
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = ["git"] + arguments
+            outcome = ProcessRunner.run(
+                executableURL: URL(fileURLWithPath: "/usr/bin/env"),
+                arguments: ["git"] + arguments, workingDirectory: workingDirectory, timeout: gitTimeout
+            )
         }
-        process.currentDirectoryURL = workingDirectory
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-        do {
-            try process.run()
-        } catch {
-            return (-1, "", "failed to launch git: \(error.localizedDescription)")
-        }
-        let group = DispatchGroup()
-        var errData = Data()
-        group.enter()
-        DispatchQueue.global().async {
-            errData = stderr.fileHandleForReading.readDataToEndOfFile()
-            group.leave()
-        }
-        let outData = stdout.fileHandleForReading.readDataToEndOfFile()
-        group.wait()
-        process.waitUntilExit()
-        return (
-            process.terminationStatus,
-            String(decoding: outData, as: UTF8.self),
-            String(decoding: errData, as: UTF8.self)
-        )
+        return (outcome.exit, outcome.stdout, outcome.stderr)
     }
 
     /// Decide whether an element's file (relative to the crawled source root)

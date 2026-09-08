@@ -220,30 +220,85 @@ public final class MCPEngine {
     }
 }
 
-/// The stdio loop: read lines until EOF, respond per line, then exit 0.
+/// Reassembles newline-delimited frames from stdin chunks with a hard size
+/// cap: a real accessibility-tree dump reaches a few megabytes, anything
+/// past the cap is a stuck or hostile sender, not a request.
+public struct FrameAssembler {
+    public enum Outcome: Equatable {
+        /// Complete frames (newline included), in order.
+        case frames([String])
+        /// The pending frame exceeded the cap; the buffer was reset and the
+        /// caller should answer with a JSON-RPC error and keep serving.
+        case overflow
+    }
+
+    public private(set) var buffer = Data()
+    public let maximumBytes: Int
+
+    public init(maximumBytes: Int) {
+        self.maximumBytes = maximumBytes
+    }
+
+    /// Append one received chunk; extracts every complete frame with a
+    /// single front-removal per chunk (removing the prefix per line is
+    /// O(n²) on large chunks). Newlines (0x0A) never occur inside UTF-8
+    /// multibyte sequences, so byte-wise splitting is safe.
+    public mutating func append(_ chunk: Data) -> Outcome {
+        buffer.append(chunk)
+        var frames: [String] = []
+        var consumed = buffer.startIndex
+        while let newline = buffer[consumed...].firstIndex(of: 0x0A) {
+            if let line = String(data: buffer.subdata(in: consumed..<newline), encoding: .utf8) {
+                frames.append(line)
+            }
+            consumed = buffer.index(after: newline)
+        }
+        buffer.removeSubrange(buffer.startIndex..<consumed)
+        if buffer.count > maximumBytes {
+            buffer.removeAll(keepingCapacity: false)
+            return .overflow
+        }
+        return .frames(frames)
+    }
+
+    /// Flush a trailing frame that ended without a newline (EOF).
+    public mutating func flushTrailing() -> String? {
+        guard !buffer.isEmpty else { return nil }
+        let line = String(data: buffer, as: UTF8.self)
+        buffer.removeAll(keepingCapacity: false)
+        return line.flatMap { $0.isEmpty ? nil : $0 }
+    }
+}
+
+/// The stdio loop: read chunks until EOF, answer per frame, then exit 0.
 public enum MCPStdio {
+    /// Real dumps (idb describe-all of a busy screen) reach a few MB;
+    /// 32 MiB bounds a frame generously while keeping memory finite.
+    public static let maximumFrameBytes = 32 * 1024 * 1024
+
     public static func run(engine: MCPEngine) -> Int32 {
         let stdin = FileHandle.standardInput
         let stdout = FileHandle.standardOutput
-        var buffer = Data()
+        var assembler = FrameAssembler(maximumBytes: maximumFrameBytes)
         while true {
             let chunk = stdin.availableData
             if chunk.isEmpty { break } // EOF — clean exit
-            buffer.append(chunk)
-            while let newline = buffer.firstIndex(of: 0x0A) {
-                let lineData = buffer.subdata(in: buffer.startIndex..<newline)
-                buffer.removeSubrange(buffer.startIndex...newline)
-                guard let line = String(data: lineData, encoding: .utf8) else { continue }
-                if let response = engine.handle(line: line) {
-                    stdout.write(Data((response + "\n").utf8))
+            switch assembler.append(chunk) {
+            case .frames(let frames):
+                for frame in frames {
+                    if let response = engine.handle(line: frame) {
+                        stdout.write(Data((response + "\n").utf8))
+                    }
                 }
+            case .overflow:
+                stdout.write(Data((
+                    "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32600,\"message\":\"request exceeds \(maximumFrameBytes) bytes\"}}\n"
+                ).utf8))
             }
         }
-        // Flush any trailing line without a newline.
-        if !buffer.isEmpty, let line = String(data: buffer, encoding: .utf8) {
-            if let response = engine.handle(line: line) {
-                stdout.write(Data((response + "\n").utf8))
-            }
+        // Flush any trailing frame without a newline.
+        if let line = assembler.flushTrailing(), let response = engine.handle(line: line) {
+            stdout.write(Data((response + "\n").utf8))
         }
         stdout.write(Data())
         return 0
