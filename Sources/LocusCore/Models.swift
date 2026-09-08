@@ -136,7 +136,7 @@ public struct LocusMap: Codable, Equatable {
 public enum MapFormat {
     public static let version = 1
     /// Single source of truth for the release version (CLI, MCP serverInfo, tool string).
-    public static let releaseVersion = "0.3.0"
+    public static let releaseVersion = "0.3.1"
     public static let tool = "locus \(releaseVersion)"
     /// Default map directory, relative to the current working directory.
     public static let defaultDirectoryName = ".locus"
