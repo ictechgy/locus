@@ -54,40 +54,13 @@ func fail(_ message: String) -> Never {
     exit(2)
 }
 
-struct ParsedArgs {
-    var positional: [String] = []
-    var options: [String: [String]] = [:]
-
-    func value(_ name: String) -> String? { options[name]?.first }
-    func values(_ name: String) -> [String] { options[name] ?? [] }
-    func flag(_ name: String) -> Bool { options[name] != nil }
-}
-
-/// Hand-rolled parsing: `--name value`, `--name=value`, `--flag`, repeated
-/// options collect into lists.
-func parse(_ arguments: [String]) -> ParsedArgs {
-    var parsed = ParsedArgs()
-    var index = 0
-    while index < arguments.count {
-        let token = arguments[index]
-        if token.hasPrefix("--") {
-            let body = String(token.dropFirst(2))
-            if let equals = body.firstIndex(of: "=") {
-                let name = String(body[..<equals])
-                let value = String(body[body.index(after: equals)...])
-                parsed.options[name, default: []].append(value)
-            } else if index + 1 < arguments.count, !arguments[index + 1].hasPrefix("--") {
-                parsed.options[body, default: []].append(arguments[index + 1])
-                index += 1
-            } else {
-                parsed.options[body, default: []].append("true")
-            }
-        } else {
-            parsed.positional.append(token)
-        }
-        index += 1
+/// Parse with a command grammar, or exit with the usage error.
+func parseOrDie(_ arguments: [String], grammar: CommandGrammar) -> ParsedArgs {
+    do {
+        return try parse(arguments, grammar: grammar)
+    } catch {
+        fail("\(error)")
     }
-    return parsed
 }
 
 func run(_ arguments: [String]) -> Int32 {
@@ -126,10 +99,9 @@ func run(_ arguments: [String]) -> Int32 {
 // MARK: - crawl
 
 func runCrawl(_ arguments: [String]) -> Int32 {
-    let args = parse(arguments)
-    guard !args.positional.isEmpty else {
-        fail("crawl requires a <sourceRoot> directory. Try --help.")
-    }
+    let args = parseOrDie(arguments, grammar: CommandGrammar(
+        positional: 1...1, valueOptions: ["out"], repeatableOptions: ["tests-glob", "exclude"]
+    ))
     let sourceRoot = URL(fileURLWithPath: args.positional[0], isDirectory: true)
     var isDirectory: ObjCBool = false
     guard FileManager.default.fileExists(atPath: sourceRoot.path, isDirectory: &isDirectory), isDirectory.boolValue else {
@@ -178,10 +150,8 @@ func runCrawl(_ arguments: [String]) -> Int32 {
 // MARK: - queries
 
 func runWhereIs(_ arguments: [String]) -> Int32 {
-    let args = parse(arguments)
-    guard let identifier = args.positional.first else {
-        fail("where-is requires an <identifier>.")
-    }
+    let args = parseOrDie(arguments, grammar: CommandGrammar(positional: 1...1, valueOptions: ["out"]))
+    let identifier = args.positional[0]
     do {
         let engine = try Engine.load(mapDirectory: args.value("out"), workingDirectory: currentDirectory())
         let result = try engine.whereIs(identifier)
@@ -193,10 +163,8 @@ func runWhereIs(_ arguments: [String]) -> Int32 {
 }
 
 func runWhatRenders(_ arguments: [String]) -> Int32 {
-    let args = parse(arguments)
-    guard let target = args.positional.first else {
-        fail("what-renders requires a <symbol|file> target.")
-    }
+    let args = parseOrDie(arguments, grammar: CommandGrammar(positional: 1...1, valueOptions: ["out"]))
+    let target = args.positional[0]
     do {
         let engine = try Engine.load(mapDirectory: args.value("out"), workingDirectory: currentDirectory())
         let result = try engine.whatRenders(target)
@@ -208,7 +176,7 @@ func runWhatRenders(_ arguments: [String]) -> Int32 {
 }
 
 func runAffectedTests(_ arguments: [String]) -> Int32 {
-    let args = parse(arguments)
+    let args = parseOrDie(arguments, grammar: CommandGrammar(positional: 0...0, valueOptions: ["out", "ref", "files"]))
     do {
         let engine = try Engine.load(mapDirectory: args.value("out"), workingDirectory: currentDirectory())
         let files = args.value("files")?
@@ -224,7 +192,7 @@ func runAffectedTests(_ arguments: [String]) -> Int32 {
 }
 
 func runMissingIdentifiers(_ arguments: [String]) -> Int32 {
-    let args = parse(arguments)
+    let args = parseOrDie(arguments, grammar: CommandGrammar(positional: 0...0, valueOptions: ["out"]))
     do {
         let engine = try Engine.load(mapDirectory: args.value("out"), workingDirectory: currentDirectory())
         let result = engine.missingIdentifiers()
@@ -238,7 +206,7 @@ func runMissingIdentifiers(_ arguments: [String]) -> Int32 {
 // MARK: - snapshot
 
 func runSnapshot(_ arguments: [String]) -> Int32 {
-    let args = parse(arguments)
+    let args = parseOrDie(arguments, grammar: CommandGrammar(positional: 0...1, valueOptions: ["out", "udid"]))
     let dumpText: String
     if let udid = args.value("udid") {
         do {
@@ -271,7 +239,7 @@ func runSnapshot(_ arguments: [String]) -> Int32 {
 // MARK: - mcp
 
 func runMCP(_ arguments: [String]) -> Int32 {
-    let args = parse(arguments)
+    let args = parseOrDie(arguments, grammar: CommandGrammar(positional: 0...0, valueOptions: ["out"]))
     do {
         let engine = try Engine.load(mapDirectory: args.value("out"), workingDirectory: currentDirectory())
         let mcp = MCPEngine(engine: engine)
