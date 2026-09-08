@@ -1,10 +1,11 @@
 # HANDOFF — 다음 세션 인수인계
 
-- **작성일**: 2026-09-08 (검토 수정 세션 종료 직후) · **기준**: `main` == `origin/main` (`00701bb`)
-- **상태**: 2026-09-08 전체 검토의 수정 필요 8건(P1 2·P2 4·P3 2) **전부 수정·머지 완료**
-  (PR #2 rebase-merge, CI 그린 4m21s — 디버그 빌드 + 테스트 전부 + 릴리스 빌드).
-  공개 저장소 https://github.com/ictechgy/locus · 태그는 아직 `v0.3.0` (이번 수정
-  전부 CHANGELOG `Unreleased` — v0.3.1 승격 대기).
+- **작성일**: 2026-09-08 (검토 수정 + v0.3.1 릴리스 세션 종료 직후) · **기준**:
+  `main` == `origin/main` (`8548a36`)
+- **상태**: 2026-09-08 전체 검토의 수정 필요 8건 전부 수정·머지(PR #2, 테스트
+  53→73) **및 v0.3.1 릴리스 완료** — 태그 `v0.3.1`(릴리스 커밋 CI 그린 후 태그) +
+  GitHub Release (https://github.com/ictechgy/locus/releases/tag/v0.3.1).
+  공개 저장소 https://github.com/ictechgy/locus.
 - 로컬 경로 `/Users/jinhongan/Desktop/Z_Workspace/locus`.
 
 ## 이번 세션 결과 (믿어도 되는 상태)
@@ -56,12 +57,9 @@
 
 ## 다음 세션 할 일 (우선순위)
 
-### 0. v0.3.1 릴리스 (권장 — 수정이 쌓여 있음)
-CHANGELOG `Unreleased` 승격 + `MapFormat.releaseVersion` "0.3.1" + README
-트랜스크립트 재실행 확인(사용자 터미널에서) + `git tag v0.3.1` + 푸시.
-릴리스 체크리스트는 AGENTS.md.
+### 0. ~~v0.3.1 릴리스~~ — 완료 (2026-09-08, 태그 + GitHub Release)
 
-### 1. 공개 후 유통 (기획서 "첫 공개 전략" — 해자 축 ②③)
+### 1. 공개 후 유통 (기획서 "첫 공개 전략" — 해자 축 ②③) ← 다음 우선순위
 - **데모 GIF**: 시뮬레이터 버그 발견 → `where_is` → 수정 → `affected_tests` 재실행.
 - **커뮤니티**: Arbigent·XcodeBuildMCP·AccessibilitySnapshot에 `match_snapshot`
   interop 소개. HN/Reddit은 GIF 후.
@@ -90,7 +88,7 @@ CHANGELOG `Unreleased` 승격 + `MapFormat.releaseVersion` "0.3.1" + README
   (nested·repoRoot·map-repo-wins·explicit-frame).
 - **맵 로드 검증** — 5개 파일 전부 + 버전 + 세대 일관성(index counts). 부분
   맵은 즉시 오류. `writeAtomic` 우회 금지(교체 실패 전파됨).
-- **버전 단일 소스**: `MapFormat.releaseVersion`(현재 "0.3.0", Unreleased 있음).
+- **버전 단일 소스**: `MapFormat.releaseVersion`(현재 "0.3.1").
 - **CLI 옵션은 전부 값 옵션** — 문법은 `LocusCore/Arguments.swift`. 새 옵션 추가
   시 CommandGrammar에 등록.
 - **idb는 선택 의존** — `--udid` 선행 `-` 가드, 타임아웃 120s. env 경유 PATH
