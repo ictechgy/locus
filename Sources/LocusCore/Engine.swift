@@ -82,16 +82,27 @@ public struct Engine {
 
     /// Changed files → elements anchored in them → deduplicated test list.
     /// - `ref`: compare working tree against a git ref.
-    /// - `files`: explicit override (comma-separated from the CLI).
+    /// - `files`: explicit override (comma-separated from the CLI). An empty
+    ///   list means "no changes" — it never falls back to git.
+    ///
+    /// The map describes `sourceRoot`; git runs in the repository containing
+    /// it (the launcher's working directory is only a fallback for maps
+    /// crawled outside any repository). Explicit files are interpreted in
+    /// that same repo frame, so both paths normalize identically.
     public func affectedTests(ref: String?, files: [String]?) throws -> AffectedTestsResult {
+        let sourceRootURL = URL(fileURLWithPath: map.sourceRoot, isDirectory: true)
+        var gitDirectory = sourceRootURL
+        var repoRoot = GitDiff.repoTopLevel(workingDirectory: sourceRootURL)
+        if repoRoot == nil, let cwdRoot = GitDiff.repoTopLevel(workingDirectory: workingDirectory) {
+            repoRoot = cwdRoot
+            gitDirectory = workingDirectory
+        }
         var changed: [String]
-        var repoRoot: String?
-        if let files, !files.isEmpty {
+        if let files {
             changed = files
         } else {
             // Our own map artifacts are not source; never report them.
-            let diff = try GitDiff.changedFiles(workingDirectory: workingDirectory, ref: ref)
-            repoRoot = diff.repositoryRoot
+            let diff = try GitDiff.changedFiles(workingDirectory: gitDirectory, ref: ref)
             changed = diff.files.filter { !$0.hasPrefix(".locus/") }
         }
         // Changed files are repo-root-relative, element files are sourceRoot-relative.

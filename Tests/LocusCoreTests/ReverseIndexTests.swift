@@ -176,6 +176,6 @@ final class ReverseIndexTests: XCTestCase {
         let (reloaded, loadedIndex) = try MapStore.load(from: outA)
         XCTAssertEqual(reloaded.elements, map.elements)
         XCTAssertEqual(reloaded.tests, map.tests)
-        XCTAssertEqual(loadedIndex?.testGlobs, ["*Tests*"])
+        XCTAssertEqual(loadedIndex.testGlobs, ["*Tests*"])
     }
 }
