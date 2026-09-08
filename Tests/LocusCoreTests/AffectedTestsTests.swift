@@ -171,6 +171,74 @@ final class AffectedTestsTests: XCTestCase {
         )
     }
 
+    func testMapRepositoryWinsOverLauncherDirectory() throws {
+        // Reading a map via an absolute --out must not run git in whatever
+        // directory the caller launched from — the map's sourceRoot decides
+        // which repository to diff.
+        let repo = Fixture.makeTree("map-repo", files: [
+            "Sources/ProfileView.swift": screenFixture,
+            "Tests/ProfileUITests.swift": testFixture,
+        ])
+        defer { Fixture.cleanup(repo) }
+        Fixture.git(["-c", "init.defaultBranch=main", "init"], in: repo)
+        Fixture.git(["add", "."], in: repo)
+        Fixture.gitIdentity(["commit", "-m", "init"], in: repo)
+        let map = try Fixture.crawl(root: repo)
+        let engine = Engine(map: map, workingDirectory: FileManager.default.temporaryDirectory)
+
+        let screen = repo.appendingPathComponent("Sources/ProfileView.swift")
+        try Data(((try String(contentsOf: screen, encoding: .utf8)) + "\n// tweak\n").utf8).write(to: screen)
+        let result = try engine.affectedTests(ref: nil, files: nil)
+        XCTAssertEqual(result.changedFiles, ["Sources/ProfileView.swift"])
+        XCTAssertEqual(result.tests.count, 2, "git must run in the map's repository, not the launcher's CWD")
+    }
+
+    func testExplicitFilesUseTheMapRepositoryFrame() throws {
+        // Nested sourceRoot + explicit file list: sibling-module paths must
+        // be matched in the map's repo frame, never suffix-matched.
+        let nested = Fixture.makeTree("explicit-frame", files: [
+            "App/Sources/ProfileView.swift": screenFixture,
+            "Other/Sources/ProfileView.swift": screenFixture,
+            "App/Tests/ProfileUITests.swift": testFixture,
+        ])
+        defer { Fixture.cleanup(nested) }
+        Fixture.git(["-c", "init.defaultBranch=main", "init"], in: nested)
+        Fixture.git(["add", "."], in: nested)
+        Fixture.gitIdentity(["commit", "-m", "init"], in: nested)
+
+        let map = try Fixture.crawl(root: nested.appendingPathComponent("App", isDirectory: true))
+        let engine = Engine(map: map, workingDirectory: nested)
+
+        let sibling = try engine.affectedTests(ref: nil, files: ["Other/Sources/ProfileView.swift"])
+        XCTAssertTrue(sibling.affectedElements.isEmpty, "explicit sibling file must not hit App elements")
+
+        let own = try engine.affectedTests(ref: nil, files: ["App/Sources/ProfileView.swift"])
+        XCTAssertEqual(Set(own.affectedElements.map { $0.identifier }), ["profile.save", "profile.notifications"])
+    }
+
+    func testEmptyExplicitFilesSkipsGitEntirely() throws {
+        // files=[] means "no changes"; it must not fall back to git (which
+        // would fail loudly when launched outside a repository).
+        let repo = Fixture.makeTree("empty-files", files: [
+            "Sources/ProfileView.swift": screenFixture,
+            "Tests/ProfileUITests.swift": testFixture,
+        ])
+        defer { Fixture.cleanup(repo) }
+        Fixture.git(["-c", "init.defaultBranch=main", "init"], in: repo)
+        Fixture.git(["add", "."], in: repo)
+        Fixture.gitIdentity(["commit", "-m", "init"], in: repo)
+        let map = try Fixture.crawl(root: repo)
+
+        let screen = repo.appendingPathComponent("Sources/ProfileView.swift")
+        try Data(((try String(contentsOf: screen, encoding: .utf8)) + "\n// tweak\n").utf8).write(to: screen)
+
+        let engine = Engine(map: map, workingDirectory: FileManager.default.temporaryDirectory)
+        let result = try engine.affectedTests(ref: nil, files: [])
+        XCTAssertTrue(result.changedFiles.isEmpty)
+        XCTAssertTrue(result.affectedElements.isEmpty)
+        XCTAssertTrue(result.tests.isEmpty)
+    }
+
     func testNestedSourceRootAvoidsCrossModuleFalsePositives() throws {
         // sourceRoot nested inside the repo, with a sibling module that shares
         // file names. Suffix-only matching would report the other module's

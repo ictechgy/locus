@@ -51,14 +51,24 @@ public enum MapStore {
     }
 
     /// Write via a temp file in the same directory, then rename over the
-    /// destination — readers never observe a torn file.
+    /// destination — readers never observe a torn file. Replacement failures
+    /// propagate: a silent failure here would report a successful crawl
+    /// whose map was never actually written.
     static func writeAtomic(_ data: Data, to destination: URL) throws {
         let directory = destination.deletingLastPathComponent()
         let temp = directory.appendingPathComponent(".\(destination.lastPathComponent).tmp-\(getpid())")
         try data.write(to: temp, options: .atomic)
         let fm = FileManager.default
-        if fm.fileExists(atPath: destination.path) {
-            _ = try? fm.replaceItemAt(destination, withItemAt: temp)
+        var isDirectory: ObjCBool = false
+        if fm.fileExists(atPath: destination.path, isDirectory: &isDirectory) {
+            guard !isDirectory.boolValue else {
+                throw LocusError("cannot write \(destination.lastPathComponent): a directory is in the way at \(destination.path)")
+            }
+            do {
+                _ = try fm.replaceItemAt(destination, withItemAt: temp)
+            } catch {
+                throw LocusError("failed to replace \(destination.lastPathComponent): \(error.localizedDescription)")
+            }
         } else {
             try fm.moveItem(at: temp, to: destination)
         }
@@ -66,15 +76,48 @@ public enum MapStore {
 
     // MARK: - Read
 
-    public static func load(from directory: URL) throws -> (map: LocusMap, index: Index?) {
+    /// Load a complete map. Every file a crawl writes must be present and the
+    /// index must agree with the arrays — a partial or torn map used to load
+    /// as empty arrays and answer queries as if nothing was referenced.
+    public static func load(from directory: URL) throws -> (map: LocusMap, index: Index) {
+        let fm = FileManager.default
+        for file in [elementsFile, testsFile, orphansFile, missingFile, indexFile] {
+            guard fm.fileExists(atPath: directory.appendingPathComponent(file).path) else {
+                throw LocusError("map at \(directory.path) is incomplete: \(file) is missing. Run `locus crawl <sourceRoot>` again.")
+            }
+        }
         let elements = try read([ElementRecord].self, directory.appendingPathComponent(elementsFile)) ?? []
         let tests = try read([ElementTests].self, directory.appendingPathComponent(testsFile)) ?? []
         let orphans = try read([OrphanLiteral].self, directory.appendingPathComponent(orphansFile)) ?? []
         let missing = try read([MissingIdentifier].self, directory.appendingPathComponent(missingFile)) ?? []
-        let index: Index? = try read(Index.self, directory.appendingPathComponent(indexFile))
-        let sourceRoot = index?.sourceRoot ?? directory.path
+        let index = try read(Index.self, directory.appendingPathComponent(indexFile)) ?? Index(
+            version: MapFormat.version, tool: MapFormat.tool, sourceRoot: directory.path,
+            testGlobs: [], excludes: [], counts: [:]
+        )
+        guard index.version == MapFormat.version else {
+            throw LocusError(
+                "map at \(directory.path) was written by format version \(index.version); this locus reads \(MapFormat.version). Run `locus crawl <sourceRoot>` again."
+            )
+        }
+        // Generation consistency: the index counts what one complete crawl
+        // wrote. A mismatch means two crawls interleaved (or a hand edit) —
+        // answering from mixed generations is the silent-wrong-answer failure
+        // this validation exists to prevent.
+        let actual: [String: Int] = [
+            "elements": elements.count,
+            "identifiedTests": tests.count,
+            "orphanLiterals": orphans.count,
+            "missingIdentifiers": missing.count,
+        ]
+        for (key, found) in actual {
+            if let expected = index.counts[key], expected != found {
+                throw LocusError(
+                    "map at \(directory.path) is inconsistent: index says \(expected) \(key), files carry \(found). Run `locus crawl <sourceRoot>` again."
+                )
+            }
+        }
         let map = LocusMap(
-            sourceRoot: sourceRoot,
+            sourceRoot: index.sourceRoot,
             elements: elements, tests: tests, orphans: orphans, missingIdentifiers: missing
         )
         return (map, index)
