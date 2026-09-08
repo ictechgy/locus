@@ -15,7 +15,7 @@ iOS 접근성 요소 ↔ Swift 소스 코드의 정적 트레이스빌리티 맵
 
 ```bash
 swift build            # 증분 빌드, 수 초 (의존성 swift-syntax는 이미 checkout됨)
-swift test             # 50개 XCTest, 수 초. 커밋 전 필수
+swift test             # 전체 XCTest 스위트, 수 초. 커밋 전 필수
 swift build -c release # 주의: 첫 릴리스 빌드는 swift-syntax 컴파일로 수 분.
                        # 반드시 run_in_background로 돌리고 짧게 폴링할 것 —
                        # 긴 블로킹 호출은 세션 타임아웃을 유발한다
@@ -34,23 +34,32 @@ Sources/LocusCore/       라이브러리 타깃 — 모든 로직은 여기에
   Crawler.swift               SwiftSyntax 비지터 — SwiftUI 수정자·레이블드 인자 호출 +
                               UIKit 대입 추출, RawHit 병합, 심볼 앵커, kind 추정,
                               인터랙티브 컨트롤만 missing 대상
-  ConstantTable.swift         정적 상수 해석 — enum/struct 멤버 리터럴, String raw-value
-                              enum(암시 케이스명 포함), 네임스페이스 별칭
-                              (static let ns = Type()), 백틱 멤버 정규화. 실전 앱의
-                              식별자 대부분이 상수 형태임(P0 실측)
+  ConstantTable.swift         정적 상수 해석 — enum/struct 멤버 **let** 리터럴, String
+                              raw-value enum(암시 케이스명 포함), 네임스페이스 별칭
+                              (static let ns = Type()), 백틱 멤버 정규화. var는 재할당
+                              가능성 때문에 제외. 실전 앱의 식별자 대부분이 상수 형태(P0)
   TestScanner.swift           역색인 — 테스트의 문자열 리터럴 + 상수 참조 ↔ 식별자
                               정확 일치, orphan은 UI-쿼리 위치로 제한(형태만으론
                               파일명·번들ID와 구분 불가 — 실측 노이즈 95%)
-  Snapshot.swift              동적 스냅샷 — 덤프 파싱(필드 별칭), idb 캡처(선택 의존),
-                              매처(identifier high / 고유 라벨 medium·low, 잔차·커버리지)
+  Snapshot.swift              동적 스냅샷 — 덤프 파싱(필드 별칭), idb 캡처(선택 의존,
+                              타임아웃 상한), 매처(identifier high / 고유 라벨 medium·low,
+                              잔차·커버리지)
   Engine.swift                질의 엔진(whereIs·whatRenders·affectedTests·
                               missingIdentifiers·matchSnapshot)
-                              + repoRelativePrefix(경로 기준계 정렬 — 아래 불변식 5)
-  GitDiff.swift               git 읽기 전용 연동 — 파이프 동시 drain 필수(교착 방지),
+                              + repoRelativePrefix(경로 기준계 정렬 — 아래 불변식 3).
+                              affectedTests의 git은 맵의 sourceRoot가 속한 저장소에서
+  GitDiff.swift               git 읽기 전용 연동(ProcessRunner 위임, 타임아웃 상한) —
                               /usr/bin/git 우선(GUI 앱 PATH 문제), option-like ref 거부
-  Glob.swift                  최소 글롭(* ? **). SourceTree — 숨김/빌드 디렉터리 제외 순회
-  MapStore.swift              .locus/ 5개 JSON — 원자적 쓰기(temp+rename), 결정적 바이트
-  MCPEngine.swift             손작성 stdio JSON-RPC 2.0 + 5툴. MCPStdio.run = 루프
+  ProcessRunner.swift         서브프로세스 실행 — 파이프 동시 drain(교착 방지) + 하드
+                              타임아웃(SIGTERM). GitDiff·SnapshotCapture가 공유
+  Glob.swift                  최소 글롭(* ? **). SourceTree — 숨김/빌드 디렉터리 제외,
+                              심볼릭 링크 skip(루프·중복 방지) 순회
+  MapStore.swift              .locus/ 5개 JSON — 원자적 쓰기(temp+rename, 실패 전파),
+                              로드 시 전제 검증(파일 전부·버전·세대 일관성), 결정적 바이트
+  MCPEngine.swift             손작성 stdio JSON-RPC 2.0 + 5툴. FrameAssembler(프레임
+                              상한 32MiB·청크당 분할). MCPStdio.run = 루프
+  Arguments.swift             CLI 옵션 문법(CommandGrammar) + 검증 파서 — 값 옵션/반복
+                              옵션/positional 범위. 모든 옵션은 값을 가짐(플래그 없음)
 Sources/LocusCLI/main.swift  CLI 엔트리(top-level). 로직 추가 금지, 코어로
 Tests/LocusCoreTests/    XCTest. FixtureSupport가 temp 트리·git 드라이버 제공
 Examples/DemoApp/             README 트랜스크립트의 입력 (부모 저장소에 일반 파일로 추적)
@@ -62,7 +71,7 @@ Scripts/setup-demo.sh         데모용 임시 내부 git 생성 — DemoApp에 
 1. **코어에 LLM·네트워크 호출 금지.** 크롤 결과는 같은 입력이면 같은 바이트
    (타임스탬프·비결정 정렬 금지 — MapStore 결정성 테스트가 지킨다).
 2. **의존성은 swift-syntax 하나.** ArgumentParser조차 안 쓴다 — 파서 추가는
-   hand-rolled(`main.swift`의 `parse`) 패턴 따르기.
+   hand-rolled(`LocusCore/Arguments.swift`의 `parse`) 패턴 따르기.
 3. **경로 기준계를 섞지 말 것.** `element.file`은 sourceRoot 상대, git 변경 파일은
    저장소 루트 상대. 비교는 반드시 `Engine.repoRelativePrefix`로 정렬 후 — suffix
    추정만 쓰면 형제 모듈 오검출로 회귀(이 버그의 회귀 테스트가
