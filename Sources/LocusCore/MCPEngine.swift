@@ -264,9 +264,9 @@ public struct FrameAssembler {
     /// Flush a trailing frame that ended without a newline (EOF).
     public mutating func flushTrailing() -> String? {
         guard !buffer.isEmpty else { return nil }
-        let line = String(data: buffer, as: UTF8.self)
+        let line = String(decoding: buffer, as: UTF8.self)
         buffer.removeAll(keepingCapacity: false)
-        return line.flatMap { $0.isEmpty ? nil : $0 }
+        return line.isEmpty ? nil : line
     }
 }
 
