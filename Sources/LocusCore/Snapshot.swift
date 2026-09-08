@@ -68,6 +68,10 @@ public enum SnapshotDump {
 /// Unlike git there is no stable /usr/bin path for idb, so PATH lookup via
 /// `/usr/bin/env` is the only portable route.
 public enum SnapshotCapture {
+    /// idb against a slow simulator can take a while — still bounded, so a
+    /// wedged companion never hangs the CLI.
+    public static let idbTimeout: TimeInterval = 120
+
     public static func idbDescribeAll(udid: String) throws -> String {
         guard !udid.isEmpty else {
             throw LocusError("--udid must not be empty.")
@@ -77,33 +81,19 @@ public enum SnapshotCapture {
         guard !udid.hasPrefix("-") else {
             throw LocusError("invalid udid '\(udid)': must not start with '-'.")
         }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["idb", "ui", "describe-all", "--udid", udid]
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-        do {
-            try process.run()
-        } catch {
-            throw LocusError("failed to launch idb: \(error.localizedDescription). Install it with `pip3 install fb-idb` or use a dump file.")
+        let outcome = ProcessRunner.run(
+            executableURL: URL(fileURLWithPath: "/usr/bin/env"),
+            arguments: ["idb", "ui", "describe-all", "--udid", udid],
+            timeout: idbTimeout
+        )
+        if outcome.timedOut {
+            throw LocusError("idb describe-all timed out after \(Int(idbTimeout))s.")
         }
-        let group = DispatchGroup()
-        var errData = Data()
-        group.enter()
-        DispatchQueue.global().async {
-            errData = stderr.fileHandleForReading.readDataToEndOfFile()
-            group.leave()
+        guard outcome.exit == 0 else {
+            let message = outcome.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw LocusError("idb describe-all failed: \(message.isEmpty ? "exit \(outcome.exit)" : message)")
         }
-        let outData = stdout.fileHandleForReading.readDataToEndOfFile()
-        group.wait()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            let message = String(decoding: errData, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-            throw LocusError("idb describe-all failed: \(message.isEmpty ? "exit \(process.terminationStatus)" : message)")
-        }
-        return String(decoding: outData, as: UTF8.self)
+        return outcome.stdout
     }
 }
 

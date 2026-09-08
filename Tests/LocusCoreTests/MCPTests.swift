@@ -113,4 +113,39 @@ final class MCPTests: XCTestCase {
         let error = try XCTUnwrap(response["error"] as? [String: Any])
         XCTAssertEqual(error["code"] as? Int, -32602)
     }
+
+    // MARK: - Frame assembly (stdio loop)
+
+    func testFrameAssemblerSplitsMultipleFramesPerChunk() {
+        var assembler = FrameAssembler(maximumBytes: 1024)
+        let outcome = assembler.append(Data("{\"a\":1}\n{\"b\":2}\n".utf8))
+        XCTAssertEqual(outcome, .frames(["{\"a\":1}", "{\"b\":2}"]))
+        XCTAssertNil(assembler.flushTrailing())
+    }
+
+    func testFrameAssemblerHandlesFramesSplitAcrossChunks() {
+        var assembler = FrameAssembler(maximumBytes: 1024)
+        XCTAssertEqual(assembler.append(Data("{\"half".utf8)), .frames([]))
+        XCTAssertEqual(assembler.append(Data("\":1}\n".utf8)), .frames(["{\"half\":1}"]))
+    }
+
+    func testFrameAssemblerTrailingFrameWithoutNewline() {
+        var assembler = FrameAssembler(maximumBytes: 1024)
+        _ = assembler.append(Data("tail".utf8))
+        XCTAssertEqual(assembler.flushTrailing(), "tail")
+        XCTAssertNil(assembler.flushTrailing())
+    }
+
+    func testFrameAssemblerOverflowResetsAndKeepsServing() {
+        var assembler = FrameAssembler(maximumBytes: 8)
+        XCTAssertEqual(assembler.append(Data(Array(repeating: 0x61, count: 9))), .overflow)
+        // The connection keeps serving: a valid follow-up frame parses.
+        XCTAssertEqual(assembler.append(Data("ok\n".utf8)), .frames(["ok"]))
+    }
+
+    func testFrameAssemblerExactLimitDoesNotOverflow() {
+        var assembler = FrameAssembler(maximumBytes: 8)
+        XCTAssertEqual(assembler.append(Data(Array(repeating: 0x61, count: 8))), .frames([]))
+        XCTAssertEqual(assembler.append(Data("\n".utf8)), .frames(["aaaaaaaa"]))
+    }
 }
