@@ -1,5 +1,55 @@
 # HANDOFF — 다음 세션 인수인계
 
+## 2026-09-08 전체 코드 검토 — 다음 수정 작업
+
+- 기준: `main@e967fb4`, 검토 시작 시 워킹트리 clean. 이번에는 이 문서만 갱신했으며 아래 항목은 **미수정**이다.
+- 범위: CLI·SwiftSyntax crawler/constants·역색인, source 순회·map 저장/로드·query, git·snapshot/idb·MCP, 테스트·설정·스크립트·문서. 아래 실측이 과거 CLT 장애/CI만 검증 가능 설명보다 우선한다.
+
+### 재현으로 확인한 수정 필요 사항
+
+1. **P1 · correctness — 일부 맵 파일이 없어도 정상 조회로 처리한다.** `Sources/LocusCore/MapStore.swift:69`, `Sources/LocusCore/Engine.swift:16`.
+   - 필수 데이터 파일 누락을 빈 배열로 바꾼다. 완전한 합성 맵에서 affected tests=1이던 결과가 `tests.json` 하나를 없애자 exit 0/tests=0으로 바뀌어 필요한 테스트를 놓친다.
+   - 다음 수정: 필수 파일·index/version/count를 검증하고 부분 맵이면 재크롤 안내 오류를 낸다. 잘못된 JSON 자체는 현재도 decode 오류를 전파하므로 그 오류가 삼켜진다고 설명하지 않는다. 여러 파일의 세대 일관성과 `MapStore.swift:60`의 교체 오류 무시도 함께 정리한다. 파일별 누락 및 교체 실패 회귀를 추가한다.
+2. **P1 · correctness — 맵 위치와 git/명시 파일의 경로 기준계가 다르다.** `Sources/LocusCore/Engine.swift:16`, `Sources/LocusCore/Engine.swift:86`, `Sources/LocusCLI/main.swift:273`.
+   - absolute `--out`으로 맵을 읽어도 git은 launcher CWD에서 실행한다. 합성 repo 밖 `/tmp`에서 호출하자 `Not a git repository`, exit 2가 됐다. 명시 `files` 분기는 repoRoot를 구하지 않아 `Other/Sources/Foo.swift`가 `App/Sources/Foo.swift` 요소에 잘못 매칭됐다.
+   - 다음 수정: map.sourceRoot에서 실제 repo 기준을 구해 git과 명시 파일을 같은 방식으로 정규화한다. repo 밖 launcher, nested sourceRoot의 sibling 파일, 명시적 `files=[]`가 git fallback을 일으키지 않는 경우를 테스트한다.
+3. **P2 · correctness — 변경 가능한 var를 확정 상수로 기록한다.** `Sources/LocusCore/ConstantTable.swift:125`.
+   - literal initializer를 가진 var도 상수표에 들어간다. 합성 `static var mutable = "default.id"`가 high-confidence identifier로 추출됐다. 런타임 재할당 시 맵이 틀린다.
+   - 다음 수정: immutable 선언만 상수/namespace alias로 인정하거나 mutable 값은 미해석으로 남긴다. static/instance var의 부정 사례와 immutable let namespace chain을 함께 테스트한다.
+4. **P2 · correctness — 빈 identifier와 해석 실패 UIKit 할당이 missing 목록에서도 빠진다.** `Sources/LocusCore/Crawler.swift:54`, `Sources/LocusCore/Crawler.swift:159`, `Sources/LocusCore/Crawler.swift:298`.
+   - 빈 문자열 identifier가 element에서는 빠지지만 identifier 보유 그룹으로는 인정되고, UIKit은 값 해석 전 assigned로 기록한다. 합성 빈 ID Button·unresolved UIKit 할당이 모두 `missing=[]`로 나왔다.
+   - 다음 수정: 해석된 nonempty identifier만 보유로 인정하고 UIKit도 해석 후 그룹/대상별로 판단한다. empty literal과 computed/member-chain 미해석 회귀를 추가한다.
+5. **P2 · reliability — 값 없는 CLI 옵션을 문자열 true로 받아 산출물을 쓴다.** `Sources/LocusCLI/main.swift:68`.
+   - `crawl Sources --out`이 오류 대신 exit 0으로 `./true/` 맵 디렉터리를 생성했다. parser가 값 없는 모든 옵션을 flag처럼 처리한다.
+   - 다음 수정: 명령별 값 옵션/flag/반복 옵션을 구분하고 누락·unknown·잘못된 추가 인자를 오류 처리한다. `--out/--ref/--files/--udid`의 값 누락과 빈 `--name=`를 CLI 회귀 테스트로 고정한다.
+6. **P2 · reliability — 디렉터리 symlink 하나로 crawl 전체가 실패한다.** `Sources/LocusCore/Glob.swift:84`.
+   - symlink와 디렉터리를 구분하지 않고 재귀한다. 합성 외부 디렉터리 링크 및 ancestor loop 모두 현재 환경에서 Cocoa 256/POSIX 20, exit 2였다. 무한 순환을 재현한 것은 아니다.
+   - 다음 수정: 링크는 기본 skip하거나, 명시적으로 추적할 경우 실제 경로 포함 여부와 방문한 파일 ID를 검사한다. 정상 파일/디렉터리 링크·루프의 처리 계약을 테스트한다.
+
+### 기존 미해결 항목 — 정적 확인, 추가 검증 필요
+
+7. **P3 · reliability/performance — MCP frame 크기 상한이 없다.** `Sources/LocusCore/MCPEngine.swift:228`.
+   - newline 전 buffer가 계속 커지고 앞부분 삭제도 반복한다. 크기 상한 부재는 코드에서 확인했으나 대형 입력 메모리·반복 복사 비용은 측정하지 않았다.
+   - 다음 수정: 실제 snapshot 크기를 고려한 최대 frame과 초과 입력 처리를 정하고, 경계/초과/여러 frame 테스트 및 메모리 측정을 한다.
+8. **P3 · reliability — git/idb 프로세스에 timeout이 없다.** `Sources/LocusCore/GitDiff.swift:56`, `Sources/LocusCore/Snapshot.swift:80`.
+   - 기존 관찰이 계속 유효하며 실제 idb 정지를 이번에 재현한 것은 아니다. timeout·종료 정리·CLI/MCP 오류 전달을 정의한 뒤 sleeping fake executable로 검증한다. 기존 stdout/stderr 동시 drain은 유지한다.
+
+### 실행 검증과 제약
+
+- `swift test --skip-update --disable-automatic-resolution --scratch-path /tmp/z-workspace-review-20260908/locus/swift-build`: **53 tests, 0 failures**. Swift 6.4/Xcode 27 beta.
+- 원본 `.build/checkouts`는 비어 있었고 pinned swift-syntax 600.0.1을 기존 전역 bare cache에서 scratch로 materialize했다. 로그는 `Fetching ... from cache`/`Fetched ... from cache (0.08s)`이며 원격 update는 없었다. 원본 manifest/lock은 수정하지 않았다.
+- Foundation-only 실제 소스의 직접 swiftc harness와 scratch-built 실제 CLI로 위 재현을 실행했다. 증거: `/tmp/z-workspace-review-20260908/locus/`의 `swift-test.log`, `partial-map-repro.log`, `out-cwd-repro.log`, `pure-core-repros.log`, `crawler-edge-repro.log`, `cli-missing-value-repro.log`, `symlink-*-repro.log`.
+- 실 idb·외부 앱 crawl·release build·setup-demo는 미실행. 일반 후속 검증은 저장소 루트의 `swift test`; 캐시를 이용할 때는 위 offline 명령을 재사용한다.
+- 오래된 “Xcode 없음/CLT 파손/CI만 가능/tmp 쓰기 불가” 설명은 현재 로컬 빌드·테스트·임시 재현 성공으로 대체한다. AGENTS/README의 50 tests도 현재 53과 다르다.
+
+### 다음 세션 시작
+
+`AGENTS.md`와 이 절을 읽고 부분 맵 로드와 경로 기준계 오류부터 회귀 테스트로 고정·수정한다. 이후 identifier 정밀도·CLI/symlink 처리를 해결한다. 기존 v0.3.1 릴리스와 실전 검증 확대는 검증이 끝난 뒤 진행한다.
+
+---
+
+## 이전 세션 기록 — 작성 당시 상태
+
 - **작성일**: 2026-09-07 (코드 검토·수정 세션 종료 직후) · **기준**: `main` == `origin/main`
 - **상태**: 리뷰 패스 #2 머지 완료(PR #1 rebase-merge, CI 그린). 공개 저장소
   https://github.com/ictechgy/locus · 태그는 아직 `v0.3.0`(이번 수정은 미릴리스,
